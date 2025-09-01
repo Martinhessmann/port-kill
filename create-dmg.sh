@@ -5,6 +5,11 @@
 
 set -e
 
+# Clean up any existing temp files
+echo "🧹 Cleaning up existing temp files..."
+rm -f "$DMG_TEMP" 2>/dev/null || true
+hdiutil detach "/Volumes/PortKill" 2>/dev/null || true
+
 echo "🏴‍☠️  Creating PortKill DMG..."
 echo "============================="
 
@@ -118,6 +123,15 @@ hdiutil create -size "${DMG_SIZE}m" -fs HFS+ -volname "PortKill" -attach "$DMG_T
 
 # Copy app to DMG
 cp -R "$BUILD_DIR/$APP_NAME" "/Volumes/PortKill/"
+
+# Also install directly to Applications (overwrite existing)
+echo "📱 Installing to /Applications/ (overwriting existing version)..."
+if [ -d "/Applications/$APP_NAME" ]; then
+    echo "   Removing existing /Applications/$APP_NAME"
+    rm -rf "/Applications/$APP_NAME"
+fi
+cp -R "$BUILD_DIR/$APP_NAME" "/Applications/"
+echo "   ✅ Installed to /Applications/$APP_NAME"
 
 # Create Applications folder link
 ln -s /Applications "/Volumes/PortKill/Applications"
