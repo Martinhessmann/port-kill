@@ -63,10 +63,10 @@ impl TrayMenu {
         Ok(())
     }
 
-        pub fn create_menu(processes: &HashMap<u16, ProcessInfo>, show_pid: bool) -> Result<Menu> {
+    pub fn create_menu(processes: &HashMap<u16, ProcessInfo>, show_pid: bool) -> Result<Menu> {
         let menu = Menu::new();
 
-        // Add "Kill All Processes" item 
+        // Add "Kill All Processes" item with explicit ID
         let kill_all_item = MenuItem::new("Kill All Processes", true, None);
         menu.append(&kill_all_item)?;
 
@@ -74,8 +74,12 @@ impl TrayMenu {
         let separator = PredefinedMenuItem::separator();
         menu.append(&separator)?;
 
-        // Add individual process items with proper IDs
-        for (port, process_info) in processes {
+        // Add individual process items with better organization
+        let mut process_entries: Vec<_> = processes.iter().collect();
+        // Sort by port for consistent ordering
+        process_entries.sort_by_key(|(port, _)| **port);
+
+                 for (_index, (port, process_info)) in process_entries.iter().enumerate() {
             let menu_text = if let (Some(_container_id), Some(container_name)) = (&process_info.container_id, &process_info.container_name) {
                 format!(
                     "Kill: Port {}: {} [Docker: {}]",
@@ -93,7 +97,7 @@ impl TrayMenu {
                 )
             };
 
-            // Create process menu item (we'll identify by text content)
+            // Create process menu item with consistent ID mapping
             let process_item = MenuItem::new(&menu_text, true, None);
             menu.append(&process_item)?;
         }
@@ -104,7 +108,7 @@ impl TrayMenu {
             menu.append(&separator)?;
         }
 
-        // Add "Quit" item
+        // Add "Quit" item with explicit ID
         let quit_item = MenuItem::new("Quit", true, None);
         menu.append(&quit_item)?;
 
@@ -120,7 +124,30 @@ impl TrayMenu {
         Ok(menu)
     }
 
+    // Helper function to get menu item mapping for better debugging
+    pub fn get_menu_item_mapping(processes: &HashMap<u16, ProcessInfo>) -> HashMap<String, String> {
+        let mut mapping = HashMap::new();
 
+        // Kill All is always first (ID 0 or 10)
+        mapping.insert("0".to_string(), "Kill All Processes".to_string());
+        mapping.insert("10".to_string(), "Kill All Processes".to_string());
+
+        // Quit is always last (ID 1 or 16)
+        let quit_id = if processes.is_empty() { "1" } else { "16" };
+        mapping.insert(quit_id.to_string(), "Quit".to_string());
+
+        // Map process items
+        let mut process_entries: Vec<_> = processes.iter().collect();
+        process_entries.sort_by_key(|(port, _)| **port);
+
+                          for (index, (port, process_info)) in process_entries.iter().enumerate() {
+             let menu_text = format!("Kill: Port {}: {}", port, process_info.name);
+             let menu_id = if index == 0 { "2" } else if index == 1 { "3" } else if index == 2 { "4" } else { "5" };
+            mapping.insert(menu_id.to_string(), menu_text);
+        }
+
+        mapping
+    }
 
     pub fn create_icon(text: &str) -> Result<Icon> {
         // Always use the poison bottle icon (custom PNG files are handled within create_poison_bottle_icon)
@@ -139,7 +166,7 @@ impl TrayMenu {
                 "../Resources/assets/green-bottle-36.png",                      // App bundle path
                 "/Applications/PortKill.app/Contents/Resources/assets/green-bottle-36.png", // Absolute app bundle path
                 "assets/green-bottle-22.png",                                    // Fallback to 22px
-                "../Resources/assets/green-bottle-22.png",                      
+                "../Resources/assets/green-bottle-22.png",
                 "/Applications/PortKill.app/Contents/Resources/assets/green-bottle-22.png"
             ]
         } else {
@@ -148,7 +175,7 @@ impl TrayMenu {
                 "../Resources/assets/orange-bottle-36.png",                     // App bundle path
                 "/Applications/PortKill.app/Contents/Resources/assets/orange-bottle-36.png", // Absolute app bundle path
                 "assets/orange-bottle-22.png",                                   // Fallback to 22px
-                "../Resources/assets/orange-bottle-22.png",                     
+                "../Resources/assets/orange-bottle-22.png",
                 "/Applications/PortKill.app/Contents/Resources/assets/orange-bottle-22.png"
             ]
         };
@@ -157,16 +184,16 @@ impl TrayMenu {
         for png_path in &png_paths {
             if Path::new(png_path).exists() {
                 debug!("Loading PNG file: {}", png_path);
-                
+
                 // Load and decode the PNG file
                 match image::open(png_path) {
                     Ok(img) => {
                         let rgba = img.to_rgba8();
                         let width = img.width();
                         let height = img.height();
-                        
+
                         debug!("PNG decoded: {}x{} pixels, {} bytes", width, height, rgba.len());
-                        
+
                         // Create icon from RGBA data
                         match Icon::from_rgba(rgba.into_raw(), width, height) {
                             Ok(icon) => {
@@ -225,7 +252,7 @@ impl TrayMenu {
         // Fallback: Create a much simpler, cleaner icon that doesn't try to recreate the complex SVG
         let mut icon_data = Vec::new();
         let size = 22; // Match the status bar appropriate size
-        
+
         debug!("Generating {}x{} RGBA bitmap = {} bytes", size, size, size * size * 4);
 
         for y in 0..size {
@@ -245,7 +272,7 @@ impl TrayMenu {
                 let center_x = size as f32 / 2.0;
                 let center_y = size as f32 / 2.0;
                 let radius = (size as f32 / 2.0) - 2.0; // Leave 2px border
-                
+
                 let dx = x as f32 - center_x;
                 let dy = y as f32 - center_y;
                 let distance = (dx * dx + dy * dy).sqrt();

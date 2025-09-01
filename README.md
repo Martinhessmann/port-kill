@@ -409,13 +409,34 @@ Monitors ports 2000-6000 (broad range covering common development server ports)
 ### Building for Development
 
 ```bash
-cargo build
+# Platform-specific builds
+./build-macos.sh      # macOS with tray icon
+./build-linux.sh      # Linux with GTK tray
+build-windows.bat     # Windows with tray icon
+
+# Generic build (macOS configuration only)
+cargo build --release
+
+# Build console mode only
+cargo build --release --bin port-kill-console
 ```
 
 ### Running with Logging
 
 ```bash
-RUST_LOG=info cargo run
+# Run with info logging
+RUST_LOG=info ./run.sh
+
+# Run with debug logging
+RUST_LOG=debug ./run.sh --verbose
+
+# Run tests
+cargo test
+cargo test -- --nocapture    # With output
+
+# Code quality checks
+cargo clippy              # Lint code
+cargo fmt                 # Format code
 ```
 
 ### GitHub Actions
@@ -445,6 +466,23 @@ To test the build scripts locally:
 
 # Windows
 build-windows.bat
+```
+
+## Debugging
+
+For comprehensive debugging information, see the [DEBUGGING.md](DEBUGGING.md) file.
+
+### Quick Debug Commands
+
+```bash
+# Run comprehensive debug script
+./debug-portkill.sh
+
+# Run with debug logging
+RUST_LOG=debug ./run.sh --verbose
+
+# Run in console mode (more stable)
+port-kill-console --console --ports 3000,8000
 ```
 
 ## Troubleshooting
