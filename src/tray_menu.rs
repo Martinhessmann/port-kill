@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::path::Path;
 #[cfg(target_os = "macos")]
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuEvent, MenuItem, MenuId, PredefinedMenuItem},
     Icon,
 };
 
@@ -66,8 +66,13 @@ impl TrayMenu {
     pub fn create_menu(processes: &HashMap<u16, ProcessInfo>, show_pid: bool) -> Result<Menu> {
         let menu = Menu::new();
 
-        // Add "Kill All Processes" item with explicit ID
-        let kill_all_item = MenuItem::new("Kill All Processes", true, None);
+        // Add "Kill All Processes" item with explicit string ID
+        let kill_all_item = MenuItem::with_id(
+            MenuId("kill_all".to_string()),
+            "🔪 Kill All Processes",
+            true,
+            None,
+        );
         menu.append(&kill_all_item)?;
 
         // Add separator
@@ -97,8 +102,13 @@ impl TrayMenu {
                 )
             };
 
-            // Create process menu item with consistent ID mapping
-            let process_item = MenuItem::new(&menu_text, true, None);
+            // Create process menu item with string ID for reliable mapping
+            let process_item = MenuItem::with_id(
+                MenuId(format!("kill_{}", port)),
+                &menu_text,
+                true,
+                None,
+            );
             menu.append(&process_item)?;
         }
 
@@ -108,8 +118,13 @@ impl TrayMenu {
             menu.append(&separator)?;
         }
 
-        // Add "Quit" item with explicit ID
-        let quit_item = MenuItem::new("Quit", true, None);
+        // Add "Quit" item with explicit string ID
+        let quit_item = MenuItem::with_id(
+            MenuId("quit".to_string()),
+            "❌ Quit",
+            true,
+            None,
+        );
         menu.append(&quit_item)?;
 
         // Add debug info in debug mode
