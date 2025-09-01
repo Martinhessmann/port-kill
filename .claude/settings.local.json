@@ -14,7 +14,13 @@
       "Bash(RUST_LOG=debug ./target/release/port-kill --console --ports 3000 --verbose)",
       "Bash(magick:*)",
       "Bash(osascript:*)",
-      "Bash(diskutil:*)"
+      "Bash(diskutil:*)",
+      "Bash(RUST_LOG=debug ./target/release/port-kill --ports 3000 --verbose)",
+      "Bash(RUST_LOG=debug ./target/release/port-kill-console --ports 3000 --verbose)",
+      "Bash(RUST_LOG=info ./target/release/port-kill-console --ports 3000,8000,8080 --verbose)",
+      "Bash(RUST_LOG=debug ./target/release/port-kill --ports 3000,8000,8080 --verbose)",
+      "Bash(RUST_LOG=debug \"/Applications/PortKill.app/Contents/MacOS/PortKill\" --ports 3000,8000,8080 --verbose)",
+      "Bash(RUST_LOG=debug \"/Applications/PortKill.app/Contents/MacOS/port-kill-binary\" --ports 3000,8000,8080 --verbose)"
     ],
     "deny": []
   }

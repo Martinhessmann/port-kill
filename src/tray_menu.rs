@@ -66,7 +66,7 @@ impl TrayMenu {
         pub fn create_menu(processes: &HashMap<u16, ProcessInfo>, show_pid: bool) -> Result<Menu> {
         let menu = Menu::new();
 
-        // Add "Kill All Processes" item with proper ID
+        // Add "Kill All Processes" item 
         let kill_all_item = MenuItem::new("Kill All Processes", true, None);
         menu.append(&kill_all_item)?;
 
@@ -93,11 +93,7 @@ impl TrayMenu {
                 )
             };
 
-            // Create unique menu ID for each process (unused for now)
-            let _menu_id = format!("process_{}_{}", port, process_info.pid);
-
-            // For now, we'll use the menu text to identify processes since tray-icon doesn't support custom IDs
-            // The menu event will contain the menu text which we can parse
+            // Create process menu item (we'll identify by text content)
             let process_item = MenuItem::new(&menu_text, true, None);
             menu.append(&process_item)?;
         }
@@ -108,7 +104,7 @@ impl TrayMenu {
             menu.append(&separator)?;
         }
 
-        // Add "Quit" item with proper ID
+        // Add "Quit" item
         let quit_item = MenuItem::new("Quit", true, None);
         menu.append(&quit_item)?;
 
