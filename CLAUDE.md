@@ -181,6 +181,17 @@ The app uses dynamically generated poison bottle icons with color-coded status:
 
 Icon generation: `tray_menu.rs` → `generate_poison_bottle_icon()`
 
+## Testing Status (v1.3.0)
+
+### Untested Features Requiring Validation
+1. **Custom Poison Bottle Icons** - Need testing on different macOS versions and display modes
+2. **macOS Application Bundle** - Need testing of launch behavior and permissions
+3. **DMG Installer** - Need testing on fresh systems and upgrade scenarios
+4. **Installation Script** - Need cross-platform validation
+5. **Debug Tools** - Need comprehensive testing of diagnostics
+
+See `CHANGELOG.md` for detailed testing requirements and GitHub issues for tracking.
+
 ## Important Notes
 
 - Always test both tray and console modes when making changes
