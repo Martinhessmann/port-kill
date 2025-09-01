@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - macOS crash issues with event loop handling
 - Process detection reliability improvements
+- **DMG Creation Issues** - Fixed volume unmounting problems and build script reliability
+  - ✅ **Resolved**: Force unmount functionality and Finder window cleanup
+  - ✅ **Resolved**: Auto-overwrite existing installations in /Applications/
 
 ### Testing Status
 
@@ -47,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [x] Basic icon generation code compiles
 - [x] DMG creation script runs successfully
 - [x] Installation script basic functionality
+- [x] Auto-overwrite functionality in DMG script
 
 #### 🟢 **Fully Tested**
 - [x] Core port monitoring functionality
