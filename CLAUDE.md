@@ -8,11 +8,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Platform-specific builds
 ./build-macos.sh      # macOS with tray icon
-./build-linux.sh      # Linux with GTK tray
+./build-linux.sh      # Linux with GTK tray (creates temporary Cargo.toml)
 build-windows.bat     # Windows with tray icon
 
-# Generic build
+# Generic build (macOS configuration only)
 cargo build --release
+
+# Run tests
+cargo test
+cargo test -- --nocapture    # With output
+
+# Code quality checks
+cargo clippy              # Lint code
+cargo fmt                 # Format code
+cargo fmt -- --check      # Check formatting
 ```
 
 ### Run Commands
@@ -26,22 +35,18 @@ run-windows.bat       # Windows (defaults to tray mode)
 ./run.sh --ports 3000,8000,8080 --docker --verbose
 ./run.sh --console --log-level warn    # Console mode for SSH/full-screen
 ./run.sh --show-pid --ignore-ports 5353,5000
-```
 
-### Testing
-```bash
-# Run unit tests
-cargo test
-cargo test -- --nocapture    # With output
-
-# Platform-specific testing
-./debug_linux.sh            # Linux diagnostics
+# Debug mode
+RUST_LOG=debug ./run.sh --verbose
 ```
 
 ### Release Management
 ```bash
 # Create a new release (triggers CI/CD)
 ./release.sh 0.1.0
+
+# Create macOS DMG installer
+./create-dmg.sh
 ```
 
 ## Architecture Overview
@@ -98,6 +103,14 @@ Port Kill is a cross-platform system tray application that monitors and manages 
 
 ## Key Implementation Details
 
+### Platform-Specific Build Process
+
+**Linux Build Process**:
+- `build-linux.sh` creates temporary `Cargo.linux.tmp.toml` with GTK dependencies
+- Creates temporary `lib.linux.tmp.rs` excluding macOS-specific modules
+- Backs up and restores original files after build
+- Checks for required packages and provides installation instructions
+
 ### Platform-Specific Considerations
 
 **macOS**:
@@ -140,6 +153,9 @@ Port Kill is a cross-platform system tray application that monitors and manages 
 # Enable debug logging
 RUST_LOG=debug ./run.sh --verbose
 
+# Run comprehensive debug script
+./debug-portkill.sh
+
 # Linux-specific debugging
 ./debug_linux.sh
 
@@ -152,115 +168,18 @@ netstat -ano | findstr :3000      # Windows
 - **build.yml**: Tests builds on PR/push to main
 - **release.yml**: Builds release binaries when release published
 - **auto-release.yml**: Creates GitHub release from tags
+- **debug.yml**: Additional debugging workflow
 - Use `./release.sh X.Y.Z` to trigger full release pipeline
 
-## Testing and Debugging New Features
+## Visual Design
 
-### Recent Enhancements to Test
+### Custom Poison Bottle Icons
+The app uses dynamically generated poison bottle icons with color-coded status:
+- **Green**: 0 processes (safe, no development servers)
+- **Orange**: 1-2 processes (some development servers)
+- **Red**: 3+ processes (many development servers)
 
-1. **Custom Poison Bottle Icons** (v1.3)
-   - **Test**: Visual appearance in system tray for different process counts
-   - **Debug**: Check icon generation in `tray_menu.rs` → `generate_poison_bottle_icon()`
-   - **Verify**: Green (0 processes), Orange (1-2), Red (3+) color transitions
-   ```bash
-   # Test with different process counts
-   python3 -m http.server 3000 &  # Start test servers
-   python3 -m http.server 3001 &
-   ./run.sh --ports 3000,3001,3002 --verbose
-   ```
-
-2. **macOS Application Bundle**
-   - **Test**: DMG installer creation and app bundle structure
-   - **Debug**: Check `create-dmg.sh` output and `/Applications/PortKill Enhanced.app/`
-   - **Verify**: Info.plist permissions, icon resources, launch behavior
-   ```bash
-   ./create-dmg.sh
-   open "PortKill Enhanced v1.3.dmg"
-   # Check: /Applications/PortKill Enhanced.app/Contents/
-   ```
-
-3. **Enhanced Installation Script**
-   - **Test**: One-liner installation on fresh system
-   - **Debug**: Check PATH configuration and Rust installation
-   - **Verify**: Cross-platform detection and dependency handling
-   ```bash
-   curl -sSL https://raw.githubusercontent.com/.../install-enhanced.sh | bash -x
-   ```
-
-4. **Debug Tools Integration**
-   - **Test**: Run `debug-portkill.sh` for comprehensive diagnostics
-   - **Debug**: Check system logs, process permissions, port detection
-   - **Verify**: Manual process killing, log analysis, troubleshooting guide
-   ```bash
-   ./debug-portkill.sh
-   RUST_LOG=debug ./run.sh --console --verbose
-   ```
-
-### Testing Checklist for New Features
-
-#### Visual/UI Features
-- [ ] Test on all platforms (macOS, Linux, Windows)
-- [ ] Verify icon appearance in light/dark mode
-- [ ] Check menu responsiveness and update frequency
-- [ ] Test with 0, 1-2, 3-5, 10+ processes
-
-#### Process Management Features
-- [ ] Test process detection accuracy
-- [ ] Verify Docker container detection
-- [ ] Test ignore lists (ports and processes)
-- [ ] Verify kill functionality (individual and bulk)
-- [ ] Test with various server types (Node, Python, Ruby, etc.)
-
-#### Installation/Distribution Features
-- [ ] Test clean installation on fresh system
-- [ ] Verify upgrade from previous version
-- [ ] Test PATH configuration
-- [ ] Check dependency installation
-- [ ] Verify uninstall process
-
-#### Console Mode Features
-- [ ] Test without GUI dependencies
-- [ ] Verify output formatting
-- [ ] Test all CLI arguments
-- [ ] Check error messages and help text
-
-### Debug Commands for Common Issues
-
-```bash
-# Icon not showing correctly
-RUST_LOG=debug ./run.sh 2>&1 | grep icon
-
-# Process detection issues
-lsof -ti :3000 -sTCP:LISTEN
-./run.sh --console --ports 3000 --verbose
-
-# Installation problems
-which port-kill
-echo $PATH
-ls -la ~/.cargo/bin/
-
-# Permission issues
-sudo lsof -ti :3000
-ps aux | grep port-kill
-
-# Memory/CPU usage
-top -pid $(pgrep port-kill)
-```
-
-### Performance Testing
-
-```bash
-# Test with many ports
-./run.sh --ports $(seq -s, 3000 3100)
-
-# Test with rapid process changes
-for i in {3000..3010}; do
-  python3 -m http.server $i &
-done
-
-# Monitor resource usage
-instruments -t "Activity Monitor" -D trace.trace port-kill
-```
+Icon generation: `tray_menu.rs` → `generate_poison_bottle_icon()`
 
 ## Important Notes
 
@@ -271,3 +190,4 @@ instruments -t "Activity Monitor" -D trace.trace port-kill
 - Follow Rust idioms and use clippy for linting
 - Test new features on all supported platforms before release
 - Document any platform-specific behavior or limitations
+- The Linux build process requires special handling due to GTK dependencies
