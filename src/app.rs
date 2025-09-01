@@ -79,9 +79,9 @@ impl PortKillApp {
 
         // Now create the tray icon after the event loop is created
         info!("Creating tray icon...");
-        let initial_menu = crate::tray_menu::TrayMenu::create_menu(&HashMap::new(), false)?;
+        let initial_menu = Self::create_static_config_menu(&HashMap::new())?;
         let tray_icon = TrayIconBuilder::new()
-            .with_tooltip("Port Kill - Development Port Monitor (Click or press Cmd+Shift+P)")
+            .with_tooltip("Port Kill - Static Config Menu (Crash-Safe)")
             .with_menu(Box::new(initial_menu))
             .with_icon(self.tray_menu.icon.clone())
             .build()?;
@@ -202,8 +202,9 @@ impl PortKillApp {
             if last_check.elapsed() >= std::time::Duration::from_secs(10) {
                 last_check = std::time::Instant::now();
 
-                // Get detailed process information with TRUE AUTO-DISCOVERY
-                let (process_count, processes) = Self::discover_all_listening_processes(&args);
+                // Get detailed process information for CONFIGURED PORTS ONLY (static approach)
+                let configured_ports = vec![3000, 3001, 3002, 3003, 5173, 8080, 8081, 8082, 5137, 5138];
+                let (process_count, processes) = Self::get_processes_on_configured_ports(&configured_ports, &args);
 
                 let status_info = StatusBarInfo::from_process_count(process_count);
                 println!("🔄 Port Status: {} - {}", status_info.text, status_info.tooltip);
@@ -252,138 +253,30 @@ impl PortKillApp {
                             }
                         }
 
-                                                                        // DISABLE MENU UPDATES TO PREVENT CRASHES
-                        // The tray-icon crate on macOS is fundamentally unstable with menu updates
-                        // Use a static menu and rely on console output for process information
-                        let process_count_changed = process_count != last_process_count;
-
-                                                if process_count_changed {
-                            info!("Process count changed from {} to {} - updating menu dynamically",
+                        // SMART MENU REBUILD: Only rebuild when process count changes (much safer than constant rebuilding)
+                        if process_count != last_process_count {
+                            info!("Process count changed from {} to {} - rebuilding menu once",
                                   last_process_count, process_count);
+                            
+                            // Store current state
+                            {
+                                let mut current = self.current_processes.lock().unwrap();
+                                current.clear();
+                                current.extend(processes.clone());
+                            }
+                            
+                            // Rebuild menu with current state (only when count changes!)
+                            match Self::create_static_config_menu(&processes) {
+                                Ok(new_menu) => {
+                                    icon.set_menu(Some(Box::new(new_menu)));
+                                    info!("✅ Menu rebuilt successfully with {} processes (count changed)", process_count);
+                                }
+                                Err(e) => {
+                                    error!("Failed to rebuild menu: {}", e);
+                                }
+                            }
+                            
                             last_process_count = process_count;
-
-                                                        // PROCESS VALIDATION - Filter out stale processes before menu update (like successful fork)
-                            let valid_processes: HashMap<u16, crate::types::ProcessInfo> = processes
-                                .iter()
-                                .filter(|(_, process_info)| Self::is_process_still_running(process_info.pid))
-                                .map(|(port, process_info)| (*port, process_info.clone()))
-                                .collect();
-
-                            let valid_process_count = valid_processes.len();
-
-                            if valid_process_count != process_count {
-                                info!("Process validation: {} processes reported, {} still running, updating with valid processes",
-                                     process_count, valid_process_count);
-                            }
-
-                            // Only proceed if we have valid processes
-                            if !valid_processes.is_empty() {
-                                // CRITICAL: Limit menu size for macOS stability (max 8-10 items)
-                                const MAX_MENU_PROCESSES: usize = 6;
-
-                                let limited_processes: HashMap<u16, crate::types::ProcessInfo> = if valid_processes.len() > MAX_MENU_PROCESSES {
-                                    // Prioritize dev ports in config ranges
-                                    let mut dev_processes: Vec<(u16, crate::types::ProcessInfo)> = valid_processes
-                                        .iter()
-                                        .filter(|(port, _)| {
-                                            (3000..=3010).contains(*port) ||
-                                            (5000..=5010).contains(*port) ||
-                                            (8000..=8010).contains(*port)
-                                        })
-                                        .map(|(port, info)| (*port, info.clone()))
-                                        .collect();
-
-                                    // Sort by port number for consistent ordering
-                                    dev_processes.sort_by_key(|(port, _)| *port);
-
-                                    // Take only the first MAX_MENU_PROCESSES
-                                    dev_processes.into_iter().take(MAX_MENU_PROCESSES).collect()
-                                } else {
-                                    valid_processes
-                                };
-
-                                info!("Limiting menu to {} processes (out of {} total) for macOS stability",
-                                     limited_processes.len(), valid_process_count);
-
-                                // Use limited menu for macOS stability
-                                match std::panic::catch_unwind(|| {
-                                    crate::tray_menu::TrayMenu::create_menu(&limited_processes, false)
-                                }) {
-                                    Ok(Ok(new_menu)) => {
-                                        // Set the new menu on the tray icon
-                                        icon.set_menu(Some(Box::new(new_menu)));
-                                        last_process_count = valid_process_count;
-                                        info!("Menu updated successfully for {} limited processes (showing {} dev ports)",
-                                             valid_process_count, limited_processes.len());
-                                    }
-                                    Ok(Err(e)) => {
-                                        error!("Failed to create limited menu: {}", e);
-                                    }
-                                    Err(e) => {
-                                        error!("Limited menu creation panicked: {:?}, skipping menu update", e);
-                                    }
-                                }
-                            } else {
-                                info!("No valid processes found, skipping menu update");
-                                last_process_count = 0;
-                            }
-                        } else {
-                            // Even if count is same, check if the actual processes changed (ports/names)
-                            // Only update if there's a significant change to avoid excessive updates
-                            let current_ports: std::collections::BTreeSet<u16> = processes.keys().cloned().collect();
-                            if last_ports != current_ports {
-                                info!("Process ports changed from {:?} to {:?} - updating menu",
-                                      last_ports.iter().collect::<Vec<_>>(),
-                                      current_ports.iter().collect::<Vec<_>>());
-                                last_ports = current_ports;
-
-                                                                // PROCESS VALIDATION for port changes too
-                                let valid_processes: HashMap<u16, crate::types::ProcessInfo> = processes
-                                    .iter()
-                                    .filter(|(_, process_info)| Self::is_process_still_running(process_info.pid))
-                                    .map(|(port, process_info)| (*port, process_info.clone()))
-                                    .collect();
-
-                                // Apply same menu limiting for port changes
-                                const MAX_MENU_PROCESSES: usize = 6;
-
-                                let limited_processes: HashMap<u16, crate::types::ProcessInfo> = if valid_processes.len() > MAX_MENU_PROCESSES {
-                                    // Prioritize dev ports in config ranges
-                                    let mut dev_processes: Vec<(u16, crate::types::ProcessInfo)> = valid_processes
-                                        .iter()
-                                        .filter(|(port, _)| {
-                                            (3000..=3010).contains(*port) ||
-                                            (5000..=5010).contains(*port) ||
-                                            (8000..=8010).contains(*port)
-                                        })
-                                        .map(|(port, info)| (*port, info.clone()))
-                                        .collect();
-
-                                    // Sort by port number for consistent ordering
-                                    dev_processes.sort_by_key(|(port, _)| *port);
-
-                                    // Take only the first MAX_MENU_PROCESSES
-                                    dev_processes.into_iter().take(MAX_MENU_PROCESSES).collect()
-                                } else {
-                                    valid_processes
-                                };
-
-                                // Use limited validated processes for menu update
-                                match std::panic::catch_unwind(|| {
-                                    crate::tray_menu::TrayMenu::create_menu(&limited_processes, false)
-                                }) {
-                                    Ok(Ok(new_menu)) => {
-                                        icon.set_menu(Some(Box::new(new_menu)));
-                                        info!("Menu updated successfully for port changes with {} limited dev processes", limited_processes.len());
-                                    }
-                                    Ok(Err(e)) => {
-                                        error!("Failed to create limited menu for port changes: {}", e);
-                                    }
-                                    Err(e) => {
-                                        error!("Limited menu creation panicked for port changes: {:?}", e);
-                                    }
-                                }
-                            }
                         }
 
                         // Update tooltip as well (for both count and port changes)
@@ -397,6 +290,65 @@ impl PortKillApp {
         })?;
 
         Ok(())
+    }
+
+    /// Scan only configured ports - much faster and more stable than auto-discovery
+    pub fn get_processes_on_configured_ports(configured_ports: &[u16], args: &Args) -> (usize, HashMap<u16, crate::types::ProcessInfo>) {
+        let mut processes = HashMap::new();
+
+        // Scan each configured port individually
+        for &port in configured_ports {
+            if let Ok(process_info) = Self::get_single_port_process(port) {
+                // Check if this process should be ignored
+                let ignore_ports = args.get_ignore_ports_set();
+                let ignore_processes = args.get_ignore_processes_set();
+                
+                let should_ignore = ignore_ports.contains(&port) || ignore_processes.contains(&process_info.name);
+                
+                if !should_ignore {
+                    processes.insert(port, process_info);
+                }
+            }
+        }
+
+        (processes.len(), processes)
+    }
+
+    /// Get process info for a single port
+    fn get_single_port_process(port: u16) -> Result<crate::types::ProcessInfo> {
+        let output = std::process::Command::new("lsof")
+            .args(&["-ti", &format!(":{}", port), "-sTCP:LISTEN"])
+            .output()?;
+
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                let pid_str = line.trim();
+                if !pid_str.is_empty() {
+                    if let Ok(pid) = pid_str.parse::<i32>() {
+                        // Get process name
+                        let name_output = std::process::Command::new("ps")
+                            .args(&["-p", &pid.to_string(), "-o", "comm="])
+                            .output()?;
+                            
+                        let name = String::from_utf8_lossy(&name_output.stdout)
+                            .trim()
+                            .to_string();
+                            
+                        return Ok(crate::types::ProcessInfo {
+                            pid,
+                            port,
+                            command: name.clone(),
+                            name,
+                            container_id: None,
+                            container_name: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!("No process found on port {}", port))
     }
 
     pub fn discover_all_listening_processes(args: &Args) -> (usize, HashMap<u16, crate::types::ProcessInfo>) {
@@ -927,6 +879,78 @@ impl PortKillApp {
         }
     }
 
+    /// Create config-based menu with current process state (rebuilt only when needed)
+    fn create_static_config_menu(processes: &HashMap<u16, crate::types::ProcessInfo>) -> Result<tray_icon::menu::Menu> {
+        use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, MenuId};
+
+        let menu = Menu::new();
+        
+        // Use configured ports with current process state
+        let configured_ports = vec![3000, 3001, 3002, 3003, 5173, 8080, 8081, 8082, 5137, 5138];
+        
+        if !configured_ports.is_empty() {
+            // Kill All option (always first)
+            let kill_all_item = MenuItem::with_id(
+                MenuId("kill_all".to_string()),
+                "🔪 Kill All Active Processes",
+                true,
+                None
+            );
+            menu.append(&kill_all_item)?;
+            
+            menu.append(&PredefinedMenuItem::separator())?;
+            
+            // Config-based port items with current state
+            for &port in &configured_ports {
+                let menu_id = format!("port_{}", port);
+                
+                // Show current state with appropriate emoji
+                let (emoji, status) = if let Some(process_info) = processes.get(&port) {
+                    let emoji = if process_info.name.starts_with("docker-proxy") {
+                        "🔴" // Red for Docker
+                    } else {
+                        "🟠" // Orange for regular processes
+                    };
+                    (emoji, format!("({})", process_info.name))
+                } else {
+                    ("🟢", "(available)".to_string())
+                };
+                
+                let menu_text = format!("{} Port {} {}", emoji, port, status);
+                
+                let port_item = MenuItem::with_id(
+                    MenuId(menu_id),
+                    &menu_text,
+                    true,
+                    None
+                );
+                menu.append(&port_item)?;
+            }
+            
+            menu.append(&PredefinedMenuItem::separator())?;
+        }
+        
+        // Settings and Quit (always present)
+        let settings_item = MenuItem::with_id(
+            MenuId("settings".to_string()),
+            "⚙️ Settings",
+            false, // Not implemented yet
+            None
+        );
+        menu.append(&settings_item)?;
+        
+        let quit_item = MenuItem::with_id(
+            MenuId("quit".to_string()),
+            "❌ Quit",
+            true,
+            None
+        );
+        menu.append(&quit_item)?;
+        
+        info!("🎯 Created static config menu with {} configured ports", configured_ports.len());
+        Ok(menu)
+    }
+
     /// Create a crash-safe menu with limited items (prevents segfaults with many processes)
     fn create_crash_resistant_dynamic_menu(processes: &HashMap<u16, crate::types::ProcessInfo>, _max_items: usize) -> Result<tray_icon::menu::Menu> {
         use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, MenuId};
@@ -1069,7 +1093,7 @@ impl PortKillApp {
                 MenuAction::KillAll // Safe no-op
             }
             _ => {
-                // Handle dynamic kill_PORT IDs
+                // Handle both old kill_PORT and new port_PORT IDs
                 if menu_id.starts_with("kill_") {
                     if let Ok(port) = menu_id.strip_prefix("kill_").unwrap_or("").parse::<u16>() {
                         // Verify this port actually has a running process
@@ -1082,6 +1106,15 @@ impl PortKillApp {
                         }
                     } else {
                         info!("Invalid port in menu ID: {}, treating as Kill All", menu_id);
+                        MenuAction::KillAll
+                    }
+                } else if menu_id.starts_with("port_") {
+                    // Handle new port_PORT IDs from static menu
+                    if let Ok(port) = menu_id.strip_prefix("port_").unwrap_or("").parse::<u16>() {
+                        info!("Kill Port {} action triggered from static menu (ID: {})", port, menu_id);
+                        MenuAction::KillProcess(port)
+                    } else {
+                        info!("Invalid port in static menu ID: {}, treating as Kill All", menu_id);
                         MenuAction::KillAll
                     }
                 } else {
