@@ -1,0 +1,37 @@
+# PortKill Configuration File
+# Customize which ports and processes to monitor
+
+[discovery]
+# Discovery mode: "range", "specific", or "all"
+# - "range": Monitor port ranges defined below
+# - "specific": Monitor only specific ports listed below
+# - "all": Auto-discover ALL listening processes (may be unstable with many processes)
+mode = "range"
+
+[ports]
+# Port ranges to monitor (only used when mode = "range")
+ranges = [
+    { start = 3000, end = 3010, description = "React, Next.js, development servers" },
+    { start = 5000, end = 5010, description = "Flask, Vite, PostgreSQL, development" },
+    { start = 8000, end = 8010, description = "Django, FastAPI, general HTTP servers" },
+]
+
+# Specific ports to monitor (only used when mode = "specific")
+specific = [3000, 3001, 5000, 5173, 8000, 8080]
+
+[ignore]
+# Ports to ignore (applies to all discovery modes)
+ports = [5353, 7000]  # Bonjour, ControlCenter
+
+# Process names to ignore (applies to all discovery modes)
+processes = ["Google", "Adobe", "Dropbox", "Cursor", "Figma", "Raycast", "ControlCe", "sharingd", "rapportd"]
+
+[app]
+# Application settings
+monitoring_interval_seconds = 3
+verbose_logging = false
+show_process_ids = false
+
+# Menu update behavior
+menu_update_cooldown_seconds = 2
+max_processes_in_menu = 20  # Limit menu size for stability

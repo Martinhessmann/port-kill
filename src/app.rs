@@ -46,7 +46,7 @@ pub struct PortKillApp {
 
 #[cfg(target_os = "macos")]
 impl PortKillApp {
-    pub fn new(args: Args) -> Result<Self> {
+    pub fn new(args: Args, _config: crate::config::Config) -> Result<Self> {
         // Create channels for communication
         let (update_sender, update_receiver) = bounded(100);
         let (menu_sender, menu_event_receiver) = bounded(100);
@@ -203,15 +203,7 @@ impl PortKillApp {
                 last_check = std::time::Instant::now();
 
                 // Get detailed process information with TRUE AUTO-DISCOVERY
-                let (process_count, processes) = match std::panic::catch_unwind(|| {
-                    Self::discover_all_listening_processes(&args)
-                }) {
-                    Ok(result) => result,
-                    Err(e) => {
-                        error!("Panic caught while getting processes: {:?}", e);
-                        (0, HashMap::new())
-                    }
-                };
+                let (process_count, processes) = Self::discover_all_listening_processes(&args);
 
                 let status_info = StatusBarInfo::from_process_count(process_count);
                 println!("🔄 Port Status: {} - {}", status_info.text, status_info.tooltip);
@@ -270,8 +262,10 @@ impl PortKillApp {
                                   last_process_count, process_count);
                             last_process_count = process_count;
 
-                            // Update menu with current processes - use careful approach
+                            // Simplified menu update to prevent crashes
                             if let Ok(new_menu) = Self::create_dynamic_menu(&processes) {
+                                // Add small delay before menu update to reduce crash frequency
+                                std::thread::sleep(std::time::Duration::from_millis(100));
                                 icon.set_menu(Some(Box::new(new_menu)));
                                 info!("Menu updated successfully with {} processes", processes.len());
                             } else {
@@ -287,7 +281,10 @@ impl PortKillApp {
                                       current_ports.iter().collect::<Vec<_>>());
                                 last_ports = current_ports;
 
+                                // Simplified port change menu update
                                 if let Ok(new_menu) = Self::create_dynamic_menu(&processes) {
+                                    // Add small delay before menu update to reduce crash frequency
+                                    std::thread::sleep(std::time::Duration::from_millis(100));
                                     icon.set_menu(Some(Box::new(new_menu)));
                                     info!("Menu updated successfully with {} processes (port change)", processes.len());
                                 } else {
@@ -810,17 +807,18 @@ impl PortKillApp {
         }
     }
 
-                    /// Create a fully dynamic menu that shows only running processes
+                    /// Create a crash-safe menu with limited items (prevents segfaults with many processes)
     fn create_dynamic_menu(processes: &HashMap<u16, crate::types::ProcessInfo>) -> Result<tray_icon::menu::Menu> {
         use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, MenuId};
 
         let menu = Menu::new();
+        const MAX_MENU_ITEMS: usize = 8; // Limit to prevent crashes
 
         if !processes.is_empty() {
-            // Kill All option (only if there are processes)
+            // Kill All option (always first)
             let kill_all_item = MenuItem::with_id(
                 MenuId("kill_all".to_string()),
-                "🔪 Kill All Monitored Processes",
+                &format!("🔪 Kill All {} Processes", processes.len()),
                 true,
                 None
             );
@@ -828,14 +826,21 @@ impl PortKillApp {
 
             menu.append(&PredefinedMenuItem::separator())?;
 
-            // Add individual process items for ONLY running processes
+            // Add individual process items - LIMITED to prevent crashes
             let mut sorted_ports: Vec<_> = processes.keys().collect();
             sorted_ports.sort();
 
-            for &port in sorted_ports {
+            let mut items_added = 0;
+            for &port in sorted_ports.iter().take(MAX_MENU_ITEMS) {
                 if let Some(process_info) = processes.get(&port) {
                     let menu_id = format!("kill_{}", port);
-                    let menu_text = format!("🎯 Kill Port {} ({})", port, process_info.name);
+                    // Truncate long process names to prevent menu width issues
+                    let display_name = if process_info.name.len() > 15 {
+                        format!("{}...", &process_info.name[..12])
+                    } else {
+                        process_info.name.clone()
+                    };
+                    let menu_text = format!("🎯 Kill Port {} ({})", port, display_name);
 
                     let kill_item = MenuItem::with_id(
                         MenuId(menu_id),
@@ -844,7 +849,19 @@ impl PortKillApp {
                         None
                     );
                     menu.append(&kill_item)?;
+                    items_added += 1;
                 }
+            }
+
+            // Show "more processes" if we have more than the limit
+            if processes.len() > MAX_MENU_ITEMS {
+                let more_item = MenuItem::with_id(
+                    MenuId("more_processes".to_string()),
+                    &format!("📊 {} more processes... (use Kill All)", processes.len() - items_added),
+                    false,
+                    None
+                );
+                menu.append(&more_item)?;
             }
 
             menu.append(&PredefinedMenuItem::separator())?;

@@ -11,8 +11,18 @@ use clap::Parser;
 fn main() -> Result<()> {
     // Parse command-line arguments
     let args = Args::parse();
-    
-    // Validate arguments
+
+    // Load configuration file
+    let config_path = std::path::Path::new(&args.config);
+    let config = match port_kill::config::Config::load_or_create(config_path) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Failed to load configuration: {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    // Validate arguments (CLI args can override config)
     if let Err(e) = args.validate() {
         eprintln!("Error: {}", e);
         std::process::exit(1);
@@ -29,12 +39,12 @@ fn main() -> Result<()> {
 
     // Initialize logging
     env_logger::init();
-    
+
     info!("Starting Port Kill application...");
-    info!("Monitoring: {}", args.get_port_description());
+    info!("Monitoring: {}", config.get_monitoring_description());
 
     // Create and run the application
-    let app = PortKillApp::new(args)?;
+    let app = PortKillApp::new(args, config)?;
     app.run()?;
 
     info!("Port Kill application stopped");

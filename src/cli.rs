@@ -64,6 +64,10 @@ pub struct Args {
     /// Auto-discover ALL listening processes on ANY port (ignores port range/specific ports)
     #[arg(long)]
     pub discover_all: bool,
+
+    /// Path to configuration file (default: ./port-kill.toml)
+    #[arg(short = 'c', long, default_value = "port-kill.toml")]
+    pub config: String,
 }
 
 impl Args {
@@ -105,23 +109,23 @@ impl Args {
 
         // Add ignore information to description
         let mut ignore_info = Vec::new();
-        
+
         if let Some(ref ignore_ports) = self.ignore_ports {
             if !ignore_ports.is_empty() {
                 ignore_info.push(format!("ignoring ports: {}", ignore_ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ")));
             }
         }
-        
+
         if let Some(ref ignore_processes) = self.ignore_processes {
             if !ignore_processes.is_empty() {
                 ignore_info.push(format!("ignoring processes: {}", ignore_processes.join(", ")));
             }
         }
-        
+
         if !ignore_info.is_empty() {
             description.push_str(&format!(" ({})", ignore_info.join(", ")));
         }
-        
+
         description
     }
 
@@ -139,7 +143,7 @@ impl Args {
                 if specific_ports.is_empty() {
                     return Err("At least one port must be specified".to_string());
                 }
-                
+
                 for &port in specific_ports {
                     if port == 0 {
                         return Err("Port 0 is not valid".to_string());
@@ -216,7 +220,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         let ports = args.get_ports_to_monitor();
         assert_eq!(ports, vec![3000, 3001, 3002, 3003, 3004, 3005]);
     }
@@ -236,7 +240,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         let ports = args.get_ports_to_monitor();
         assert_eq!(ports, vec![3000, 8000, 8080]);
     }
@@ -256,7 +260,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         let ignore_ports = args.get_ignore_ports_set();
         assert_eq!(ignore_ports, HashSet::from([5353, 5000, 7000]));
     }
@@ -276,7 +280,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         let ignore_processes = args.get_ignore_processes_set();
         assert_eq!(ignore_processes, HashSet::from([String::from("Chrome"), String::from("ControlCe")]));
     }
@@ -296,7 +300,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert_eq!(args.get_port_description(), "port range: 2000-6000 (ignoring ports: 5353, 5000, ignoring processes: Chrome, ControlCe)");
     }
 
@@ -315,7 +319,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert_eq!(args.get_port_description(), "port range: 3000-3010");
     }
 
@@ -334,7 +338,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert_eq!(args.get_port_description(), "specific ports: 3000, 8000, 8080");
     }
 
@@ -353,7 +357,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert!(args.validate().is_ok());
     }
 
@@ -372,7 +376,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert!(args.validate().is_err());
     }
 
@@ -391,7 +395,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert!(args.validate().is_err());
     }
 
@@ -410,7 +414,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert!(args.validate().is_err());
     }
 
@@ -429,7 +433,7 @@ mod tests {
             log_level: LogLevel::Info,
             discover_all: false,
         };
-        
+
         assert!(args.validate().is_err());
     }
 }
