@@ -79,10 +79,10 @@ impl PortKillApp {
 
         // Now create the tray icon after the event loop is created
         info!("Creating tray icon...");
-        let static_menu = Self::create_static_menu()?;
+        let dynamic_menu = Self::create_dynamic_menu(&HashMap::new())?;
         let tray_icon = TrayIconBuilder::new()
             .with_tooltip("Port Kill - Development Port Monitor (Click or press Cmd+Shift+P)")
-            .with_menu(Box::new(static_menu))
+            .with_menu(Box::new(dynamic_menu))
             .with_icon(self.tray_menu.icon.clone())
             .build()?;
 
@@ -142,6 +142,12 @@ impl PortKillApp {
 
                                                         // Stable menu ID mapping for the simplified menu structure
                             // Our stable menu has: Kill All (ID 0), Separator, Process 1 (ID 2), Process 2 (ID 3), etc., Separator, Quit (last ID)
+                            // Add debug info to understand the actual menu structure
+                            info!("=== MENU DEBUG INFO ===");
+                            info!("Menu ID clicked: {}", menu_id_str);
+                            info!("Current processes: {:?}", processes.keys().collect::<Vec<_>>());
+                            info!("========================");
+
                             let menu_action = Self::map_menu_id_to_action(&menu_id_str, processes);
 
                             match menu_action {
@@ -156,12 +162,7 @@ impl PortKillApp {
                                 }
                                 MenuAction::KillProcess(port) => {
                                     info!("Kill process on port {} clicked (ID: {})", port, menu_id_str);
-                                    if let Some(process_info) = processes.get(&port) {
-                                        Self::kill_single_process(process_info.pid as i32, &args_clone)
-                                    } else {
-                                        warn!("Process on port {} not found", port);
-                                        Ok(())
-                                    }
+                                    Self::kill_processes_on_port(port, &args_clone)
                                 }
                                 MenuAction::Unknown => {
                                     info!("Unknown menu item clicked: {}, defaulting to kill all", menu_id_str);
@@ -239,10 +240,18 @@ impl PortKillApp {
                             error!("Failed to update tooltip: {}", e);
                         }
 
-                        // Update icon with new status
+                        // Update icon with new status (force update every time to fix hover-only issue)
                         if let Ok(new_icon) = TrayMenu::create_icon(&status_info.text) {
+                            // Try setting icon to None first, then to the new icon to force refresh
+                            let _ = icon.set_icon(None);
+                            std::thread::sleep(std::time::Duration::from_millis(50));
+
                             if let Err(e) = icon.set_icon(Some(new_icon)) {
                                 error!("Failed to update icon: {}", e);
+                            } else {
+                                info!("Icon forcefully updated to show {} processes (color: {})",
+                                      process_count,
+                                      if process_count == 0 { "green" } else { "orange" });
                             }
                         }
 
@@ -252,11 +261,19 @@ impl PortKillApp {
                         let process_count_changed = process_count != last_process_count;
 
                         if process_count_changed {
-                            info!("Process count changed from {} to {} - menu updates disabled to prevent crashes",
+                            info!("Process count changed from {} to {} - updating menu dynamically",
                                   last_process_count, process_count);
                             last_process_count = process_count;
 
-                            // Update tooltip only (this is safer than menu updates)
+                            // Update menu with current processes - use careful approach
+                            if let Ok(new_menu) = Self::create_dynamic_menu(&processes) {
+                                icon.set_menu(Some(Box::new(new_menu)));
+                                info!("Menu updated successfully with {} processes", processes.len());
+                            } else {
+                                error!("Failed to create dynamic menu");
+                            }
+
+                            // Update tooltip as well
                             let status_info = StatusBarInfo::from_process_count(process_count);
                             if let Err(e) = icon.set_tooltip(Some(&format!("{} - Click for actions", status_info.tooltip))) {
                                 error!("Failed to update tooltip: {}", e);
@@ -466,7 +483,7 @@ impl PortKillApp {
         Ok(())
     }
 
-        pub fn kill_single_process(pid: i32, args: &Args) -> Result<()> {
+            pub fn kill_single_process(pid: i32, args: &Args) -> Result<()> {
         info!("Killing single process PID: {}", pid);
 
         // Check if this process should be ignored
@@ -512,30 +529,115 @@ impl PortKillApp {
         Self::kill_process(pid)
     }
 
-        /// Create a static menu that never changes to prevent crashes
-    fn create_static_menu() -> Result<tray_icon::menu::Menu> {
-        use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+    pub fn kill_processes_on_port(port: u16, args: &Args) -> Result<()> {
+        info!("Killing processes on port {}...", port);
+
+        // Use lsof to get PIDs on the specific port
+        let output = std::process::Command::new("lsof")
+            .args(&["-ti", &format!(":{}", port), "-sTCP:LISTEN"])
+            .output();
+
+        match output {
+            Ok(output) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let mut pids_killed = 0;
+
+                    for line in stdout.lines() {
+                        let pid_str = line.trim();
+                        if !pid_str.is_empty() {
+                            if let Ok(pid) = pid_str.parse::<i32>() {
+                                info!("Attempting to kill process PID: {} on port {}", pid, port);
+                                match Self::kill_process(pid) {
+                                    Ok(_) => {
+                                        info!("Successfully killed process PID: {} on port {}", pid, port);
+                                        pids_killed += 1;
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to kill process {} on port {}: {}", pid, port, e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if pids_killed == 0 {
+                        info!("No processes found on port {}", port);
+                    } else {
+                        info!("Killed {} process(es) on port {}", pids_killed, port);
+                    }
+
+                    Ok(())
+                } else {
+                    info!("No processes found on port {}", port);
+                    Ok(())
+                }
+            }
+            Err(e) => {
+                error!("Failed to run lsof for port {}: {}", port, e);
+                Err(anyhow::anyhow!("Failed to check port {}: {}", port, e))
+            }
+        }
+    }
+
+                    /// Create a fully dynamic menu that shows only running processes
+    fn create_dynamic_menu(processes: &HashMap<u16, crate::types::ProcessInfo>) -> Result<tray_icon::menu::Menu> {
+        use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem, MenuId};
 
         let menu = Menu::new();
 
-        // Simple static menu that works for all scenarios
-        let kill_all_item = MenuItem::new("🔪 Kill All Monitored Processes", true, None);
-        menu.append(&kill_all_item)?;
+        if !processes.is_empty() {
+            // Kill All option (only if there are processes)
+            let kill_all_item = MenuItem::with_id(
+                MenuId("kill_all".to_string()),
+                "🔪 Kill All Monitored Processes",
+                true,
+                None
+            );
+            menu.append(&kill_all_item)?;
 
-        menu.append(&PredefinedMenuItem::separator())?;
+            menu.append(&PredefinedMenuItem::separator())?;
 
-        // Generic process killing options
-        let kill_port_item = MenuItem::new("🎯 Kill Processes (see console for list)", false, None);
-        menu.append(&kill_port_item)?;
+            // Add individual process items for ONLY running processes
+            let mut sorted_ports: Vec<_> = processes.keys().collect();
+            sorted_ports.sort();
 
-        menu.append(&PredefinedMenuItem::separator())?;
+            for &port in sorted_ports {
+                if let Some(process_info) = processes.get(&port) {
+                    let menu_id = format!("kill_{}", port);
+                    let menu_text = format!("🎯 Kill Port {} ({})", port, process_info.name);
 
-        let refresh_item = MenuItem::new("🔄 Check Console for Process List", false, None);
-        menu.append(&refresh_item)?;
+                    let kill_item = MenuItem::with_id(
+                        MenuId(menu_id),
+                        &menu_text,
+                        true,
+                        None
+                    );
+                    menu.append(&kill_item)?;
+                }
+            }
 
-        menu.append(&PredefinedMenuItem::separator())?;
+            menu.append(&PredefinedMenuItem::separator())?;
+        } else {
+            // No processes running
+            let no_processes_item = MenuItem::with_id(
+                MenuId("no_processes".to_string()),
+                "✅ No processes running",
+                false,
+                None
+            );
+            menu.append(&no_processes_item)?;
 
-        let quit_item = MenuItem::new("❌ Quit", true, None);
+            menu.append(&PredefinedMenuItem::separator())?;
+        }
+
+        // Always show quit
+        let quit_item = MenuItem::with_id(
+            MenuId("quit".to_string()),
+            "❌ Quit",
+            true,
+            None
+        );
         menu.append(&quit_item)?;
 
         Ok(menu)
@@ -584,40 +686,59 @@ impl PortKillApp {
         Ok(menu)
     }
 
-                /// Map menu ID to action based on STATIC menu structure (never changes)
-    fn map_menu_id_to_action(menu_id: &str, _processes: &HashMap<u16, crate::types::ProcessInfo>) -> MenuAction {
-        // Parse menu ID as number for consistent mapping
-        let id_num = menu_id.parse::<i32>().unwrap_or(-1);
-
-                // Static menu structure - BUT the actual IDs are different than expected!
-        // Based on the logs, the actual structure seems to be:
-        //   ID 0: Kill All Monitored Processes  ← This is what we want to work
-        //   ID 1: Separator (not clickable)
-        //   ID 2: Kill Processes (see console for list) - NOT CLICKABLE
-        //   ID 3: Separator (not clickable)
-        //   ID 4: Check Console for Process List - NOT CLICKABLE
-        //   ID 5: Separator (not clickable)
-        //   ID 6: Quit
-        //
-        // But from your click, ID "3" was generated when you clicked "Kill All"
-        // So let me map the ACTUAL observed IDs:
-
-        match id_num {
-            0 | 3 => MenuAction::KillAll, // ID 3 is actually Kill All (from your click)
-            6 => MenuAction::Quit,
+                        /// Map menu ID to action using dynamic string IDs (fully dynamic!)
+    fn map_menu_id_to_action(menu_id: &str, processes: &HashMap<u16, crate::types::ProcessInfo>) -> MenuAction {
+        match menu_id {
+            "kill_all" => {
+                info!("Kill All action triggered (ID: {})", menu_id);
+                MenuAction::KillAll
+            }
+            "quit" => {
+                info!("Quit action triggered (ID: {})", menu_id);
+                MenuAction::Quit
+            }
+            "no_processes" => {
+                info!("No processes item clicked (ID: {})", menu_id);
+                MenuAction::KillAll // Safe no-op
+            }
             _ => {
-                // Try common alternative IDs from previous versions
-                match menu_id {
-                    "10" => MenuAction::KillAll, // Legacy Kill All ID
-                    "16" => MenuAction::Quit,    // Legacy Quit ID
-                    "1" | "2" | "4" | "5" => {
-                        // These might be separators or info items, default to Kill All for safety
-                        info!("Middle menu item clicked (ID: {}), treating as Kill All", menu_id);
+                // Handle dynamic kill_PORT IDs
+                if menu_id.starts_with("kill_") {
+                    if let Ok(port) = menu_id.strip_prefix("kill_").unwrap_or("").parse::<u16>() {
+                        // Verify this port actually has a running process
+                        if processes.contains_key(&port) {
+                            info!("Kill Port {} action triggered (ID: {})", port, menu_id);
+                            MenuAction::KillProcess(port)
+                        } else {
+                            info!("Port {} not found in current processes, treating as Kill All", port);
+                            MenuAction::KillAll
+                        }
+                    } else {
+                        info!("Invalid port in menu ID: {}, treating as Kill All", menu_id);
                         MenuAction::KillAll
                     }
-                    "8" => MenuAction::Quit,     // Legacy Quit with processes
-                    "12" | "13" | "14" | "15" => MenuAction::KillAll, // Legacy process IDs -> Kill All
-                    _ => {
+                } else {
+                    // Fallback for legacy numeric IDs (from previous versions)
+                    if let Ok(id_num) = menu_id.parse::<i32>() {
+                        match id_num {
+                            3 => {
+                                info!("Legacy ID 3 mapped to Kill All");
+                                MenuAction::KillAll
+                            }
+                            10 => {
+                                info!("Legacy ID 10 mapped to Kill All");
+                                MenuAction::KillAll
+                            }
+                            11 | 16 => {
+                                info!("Legacy ID {} mapped to Quit", id_num);
+                                MenuAction::Quit
+                            }
+                            _ => {
+                                info!("Unknown numeric menu ID: {}, defaulting to Kill All", menu_id);
+                                MenuAction::KillAll
+                            }
+                        }
+                    } else {
                         info!("Unknown menu ID: {}, defaulting to Kill All", menu_id);
                         MenuAction::KillAll
                     }

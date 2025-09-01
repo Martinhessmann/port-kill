@@ -36,24 +36,24 @@ impl ProcessMonitor {
         let port_description = if self.ports_to_monitor.len() <= 10 {
             format!("ports: {}", self.ports_to_monitor.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "))
         } else {
-            format!("{} ports: {} to {}", 
-                self.ports_to_monitor.len(), 
-                self.ports_to_monitor.first().unwrap_or(&0), 
+            format!("{} ports: {} to {}",
+                self.ports_to_monitor.len(),
+                self.ports_to_monitor.first().unwrap_or(&0),
                 self.ports_to_monitor.last().unwrap_or(&0))
         };
-        
+
         info!("Starting process monitoring on {}", port_description);
 
         loop {
             match self.scan_processes().await {
                 Ok(processes) => {
                     let update = ProcessUpdate::new(processes.clone());
-                    
+
                     // Check if there are any changes
                     if self.current_processes != processes {
                         info!("Process update: {} processes found", update.count);
                         self.current_processes = processes;
-                        
+
                         if let Err(e) = self.update_sender.send(update) {
                             error!("Failed to send process update: {}", e);
                         }
@@ -68,16 +68,97 @@ impl ProcessMonitor {
         }
     }
 
-    async fn scan_processes(&self) -> Result<HashMap<u16, ProcessInfo>> {
+        async fn scan_processes(&self) -> Result<HashMap<u16, ProcessInfo>> {
+        // Stop guessing! Actually discover ALL processes listening on ALL ports
+        self.discover_all_listening_processes().await
+    }
+
+    /// Discover ALL processes listening on ANY port (no more guessing!)
+    async fn discover_all_listening_processes(&self) -> Result<HashMap<u16, ProcessInfo>> {
         let mut processes = HashMap::new();
 
-        for &port in &self.ports_to_monitor {
-            if let Ok(process_info) = self.get_process_on_port(port).await {
-                processes.insert(port, process_info);
+        #[cfg(not(target_os = "windows"))]
+        {
+            // Use lsof to find ALL listening processes on ALL ports
+            let output = Command::new("lsof")
+                .args(&["-i", "-P", "-n"])  // -i for internet files, -P for port numbers, -n for numeric addresses
+                .output()
+                .context("Failed to execute lsof command")?;
+
+            if !output.status.success() {
+                return Ok(processes);
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            for line in stdout.lines() {
+                // Parse lsof output to extract listening processes
+                // Example line: "Python    1234 user   3u  IPv4 0x1234  0t0  TCP *:3000 (LISTEN)"
+                if line.contains("(LISTEN)") || line.contains("*:") {
+                    if let Some(port) = self.extract_port_from_lsof_line(line) {
+                        if let Ok(process_info) = self.get_process_on_port(port).await {
+                            processes.insert(port, process_info);
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Use netstat to find ALL listening processes on Windows
+            let output = Command::new("netstat")
+                .args(&["-ano"])  // -a for all, -n for numeric, -o for process ID
+                .output()
+                .context("Failed to execute netstat command")?;
+
+            if !output.status.success() {
+                return Ok(processes);
+            }
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+
+            for line in stdout.lines() {
+                if line.contains("LISTENING") || line.contains("0.0.0.0:") {
+                    if let Some(port) = self.extract_port_from_netstat_line(line) {
+                        if let Ok(process_info) = self.get_process_on_port(port).await {
+                            processes.insert(port, process_info);
+                        }
+                    }
+                }
             }
         }
 
         Ok(processes)
+    }
+
+    /// Extract port number from lsof output line
+    fn extract_port_from_lsof_line(&self, line: &str) -> Option<u16> {
+        // Look for patterns like "*:3000" or "localhost:8080"
+        if let Some(colon_pos) = line.rfind(':') {
+            let after_colon = &line[colon_pos + 1..];
+            // Find the end of the port number (space or parenthesis)
+            let port_end = after_colon.find(' ').unwrap_or(after_colon.len());
+            let port_str = &after_colon[..port_end];
+            port_str.parse().ok()
+        } else {
+            None
+        }
+    }
+
+    /// Extract port number from netstat output line
+    fn extract_port_from_netstat_line(&self, line: &str) -> Option<u16> {
+        // Look for patterns like "0.0.0.0:3000" or "127.0.0.1:8080"
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        for part in parts {
+            if let Some(colon_pos) = part.rfind(':') {
+                let port_str = &part[colon_pos + 1..];
+                if let Ok(port) = port_str.parse::<u16>() {
+                    return Some(port);
+                }
+            }
+        }
+        None
     }
 
     async fn get_process_on_port(&self, port: u16) -> Result<ProcessInfo> {
@@ -124,7 +205,7 @@ impl ProcessMonitor {
                 let pid_str = output_str.trim();
                 if !pid_str.is_empty() {
                     let pid: i32 = pid_str.parse().context("Failed to parse PID")?;
-                    
+
                     // Get process details using ps
                     let process_info = self.get_process_details(pid, port).await?;
                     return Ok(process_info);
@@ -266,13 +347,13 @@ impl ProcessMonitor {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        
+
         for line in stdout.lines().skip(1) { // Skip header
             let parts: Vec<&str> = line.split('\t').collect();
             if parts.len() >= 3 {
                 let container_id = parts[0].trim();
                 let _ports_str = parts[2].trim();
-                
+
                 // Check if this container is using the port we're interested in
                 if self.container_has_pid(container_id, pid).await? {
                     return Ok(Some(container_id.to_string()));
@@ -296,7 +377,7 @@ impl ProcessMonitor {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        
+
         // Check if the PID exists in the container's process list
         for line in stdout.lines().skip(1) { // Skip header
             let parts: Vec<&str> = line.split_whitespace().collect();
@@ -363,14 +444,14 @@ impl ProcessMonitor {
             match kill(Pid::from_raw(pid), Signal::SIGTERM) {
                 Ok(_) => {
                     info!("Sent SIGTERM to process {}", pid);
-                    
+
                     // Wait a bit and check if process is still alive
                     sleep(Duration::from_millis(500)).await;
-                    
+
                     // Check if process is still running
                     if self.is_process_running(pid).await {
                         warn!("Process {} still running after SIGTERM, sending SIGKILL", pid);
-                        
+
                         // Send SIGKILL if process is still alive
                         match kill(Pid::from_raw(pid), Signal::SIGKILL) {
                             Ok(_) => {
@@ -470,31 +551,31 @@ pub fn get_processes_on_ports(ports: &[u16], args: &crate::cli::Args) -> (usize,
         // For large ranges, use range format
         format!("{}-{}", ports.first().unwrap_or(&0), ports.last().unwrap_or(&0))
     };
-    
+
     // Use lsof to get detailed process information
     let output = std::process::Command::new("lsof")
         .args(&["-i", &format!(":{}", port_range), "-sTCP:LISTEN", "-P", "-n"])
         .output();
-        
+
     match output {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let mut processes = std::collections::HashMap::new();
-            
+
             // Get ignore sets for efficient lookup
             let ignore_ports = args.get_ignore_ports_set();
             let ignore_processes = args.get_ignore_processes_set();
-            
+
             for line in stdout.lines().skip(1) { // Skip header
                 let parts: Vec<&str> = line.split_whitespace().collect();
                 if parts.len() >= 9 {
                     if let (Ok(pid), Ok(port)) = (parts[1].parse::<i32>(), parts[8].split(':').last().unwrap_or("0").parse::<u16>()) {
                         let command = parts[0].to_string();
                         let name = parts[0].to_string();
-                        
+
                         // Check if this process should be ignored
                         let should_ignore = ignore_ports.contains(&port) || ignore_processes.contains(&name);
-                        
+
                         if !should_ignore {
                             processes.insert(port, crate::types::ProcessInfo {
                                 pid,
@@ -510,7 +591,7 @@ pub fn get_processes_on_ports(ports: &[u16], args: &crate::cli::Args) -> (usize,
                     }
                 }
             }
-            
+
             (processes.len(), processes)
         }
         Err(_) => (0, std::collections::HashMap::new())
@@ -526,9 +607,9 @@ pub fn kill_all_processes(ports: &[u16], args: &crate::cli::Args) -> anyhow::Res
         // For large ranges, use range format
         format!("{}-{}", ports.first().unwrap_or(&0), ports.last().unwrap_or(&0))
     };
-    
+
     log::info!("Killing all processes on ports {}...", port_range);
-    
+
     // Get all PIDs on the monitored ports
     let output = match std::process::Command::new("lsof")
         .args(&["-i", &format!(":{}", port_range), "-sTCP:LISTEN", "-P", "-n"])
@@ -539,25 +620,25 @@ pub fn kill_all_processes(ports: &[u16], args: &crate::cli::Args) -> anyhow::Res
             return Err(anyhow::anyhow!("Failed to run lsof: {}", e));
         }
     };
-        
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     let lines: Vec<&str> = stdout.lines().collect();
-    
+
     // Get ignore sets for efficient lookup
     let ignore_ports = args.get_ignore_ports_set();
     let ignore_processes = args.get_ignore_processes_set();
-    
+
     let mut pids_to_kill = Vec::new();
-    
+
     for line in lines {
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() >= 9 {
             if let (Ok(pid), Ok(port)) = (parts[1].parse::<i32>(), parts[8].split(':').last().unwrap_or("0").parse::<u16>()) {
                 let name = parts[0].to_string();
-                
+
                 // Check if this process should be ignored
                 let should_ignore = ignore_ports.contains(&port) || ignore_processes.contains(&name);
-                
+
                 if !should_ignore {
                     pids_to_kill.push(pid);
                 } else {
@@ -566,14 +647,14 @@ pub fn kill_all_processes(ports: &[u16], args: &crate::cli::Args) -> anyhow::Res
             }
         }
     }
-    
+
     if pids_to_kill.is_empty() {
         log::info!("No processes found to kill (all were ignored or none found)");
         return Ok(());
     }
-    
+
     log::info!("Found {} processes to kill (after filtering ignored processes)", pids_to_kill.len());
-    
+
     for pid in pids_to_kill {
         log::info!("Attempting to kill process PID: {}", pid);
         match kill_process(pid) {
@@ -581,38 +662,38 @@ pub fn kill_all_processes(ports: &[u16], args: &crate::cli::Args) -> anyhow::Res
             Err(e) => log::error!("Failed to kill process {}: {}", pid, e),
         }
     }
-    
+
     log::info!("Finished killing all processes");
     Ok(())
 }
 
 pub fn kill_single_process(pid: i32, args: &crate::cli::Args) -> anyhow::Result<()> {
     log::info!("Killing single process PID: {}", pid);
-    
+
     // Check if this process should be ignored
     let ignore_ports = args.get_ignore_ports_set();
     let ignore_processes = args.get_ignore_processes_set();
-    
+
     // Get process info to check if it should be ignored
     let output = std::process::Command::new("ps")
         .args(&["-p", &pid.to_string(), "-o", "comm="])
         .output();
-        
+
     if let Ok(output) = output {
         let process_name = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        
+
         // Check if process name should be ignored
         if ignore_processes.contains(&process_name) {
             log::info!("Ignoring process {} (PID {}) - process name is in ignore list", process_name, pid);
             return Ok(());
         }
     }
-    
+
     // Get port info to check if it should be ignored
     let output = std::process::Command::new("lsof")
         .args(&["-p", &pid.to_string(), "-i", "-P", "-n"])
         .output();
-        
+
     if let Ok(output) = output {
         let stdout = String::from_utf8_lossy(&output.stdout);
         for line in stdout.lines() {
@@ -627,7 +708,7 @@ pub fn kill_single_process(pid: i32, args: &crate::cli::Args) -> anyhow::Result<
             }
         }
     }
-    
+
     // Process is not ignored, proceed with killing
     kill_process(pid)
 }
@@ -637,9 +718,9 @@ fn kill_process(pid: i32) -> anyhow::Result<()> {
     {
         use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
-        
+
         log::info!("Killing process PID: {} with SIGTERM", pid);
-        
+
         // First try SIGTERM (graceful termination)
         match kill(Pid::from_raw(pid), Signal::SIGTERM) {
             Ok(_) => log::info!("SIGTERM sent to PID: {}", pid),
@@ -648,17 +729,17 @@ fn kill_process(pid: i32) -> anyhow::Result<()> {
                 log::warn!("Failed to send SIGTERM to PID {}: {} (process may already be terminated)", pid, e);
             }
         }
-        
+
         // Wait a bit for graceful termination
         std::thread::sleep(std::time::Duration::from_millis(500));
-        
+
         // Check if process is still running
         let still_running = std::process::Command::new("ps")
             .args(&["-p", &pid.to_string()])
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false);
-            
+
         if still_running {
             // Process still running, send SIGKILL
             log::info!("Process {} still running, sending SIGKILL", pid);
@@ -673,18 +754,18 @@ fn kill_process(pid: i32) -> anyhow::Result<()> {
             log::info!("Process {} terminated gracefully", pid);
         }
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        
+
         log::info!("Killing process PID: {} on Windows", pid);
-        
+
         // Use taskkill to terminate the process
         let output = Command::new("taskkill")
             .args(&["/PID", &pid.to_string(), "/F"])
             .output();
-            
+
         match output {
             Ok(output) => {
                 if output.status.success() {
@@ -699,6 +780,6 @@ fn kill_process(pid: i32) -> anyhow::Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
