@@ -31,6 +31,9 @@ mkdir -p "$BUILD_DIR/$APP_NAME/Contents/Resources"
 # Copy the binary
 cp "./target/release/port-kill" "$BUILD_DIR/$APP_NAME/Contents/MacOS/port-kill-binary"
 
+# Copy assets directory to Resources
+cp -R "assets" "$BUILD_DIR/$APP_NAME/Contents/Resources/assets"
+
 # Create launch script
 cat > "$BUILD_DIR/$APP_NAME/Contents/MacOS/PortKill" << 'LAUNCH_EOF'
 #!/bin/bash

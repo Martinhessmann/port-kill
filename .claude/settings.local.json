@@ -11,7 +11,8 @@
       "Bash(./target/release/port-kill:*)",
       "Bash(cargo build:*)",
       "Bash(timeout:*)",
-      "Bash(RUST_LOG=debug ./target/release/port-kill --console --ports 3000 --verbose)"
+      "Bash(RUST_LOG=debug ./target/release/port-kill --console --ports 3000 --verbose)",
+      "Bash(magick:*)"
     ],
     "deny": []
   }

@@ -1,10 +1,9 @@
 use crate::types::{ProcessInfo, StatusBarInfo};
 use anyhow::Result;
 use crossbeam_channel::Sender;
-use image::ImageReader;
+use image;
 use log::debug;
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
 #[cfg(target_os = "macos")]
 use tray_icon::{
@@ -137,25 +136,53 @@ impl TrayMenu {
         let number = text.chars().filter(|c| c.is_numeric()).collect::<String>();
         let num = number.parse::<u32>().unwrap_or(0);
 
-        let png_path = if num == 0 {
-            "assets/green-bottle-24.png"
+        // Try multiple paths for PNG files (app bundle and development)
+        let png_paths = if num == 0 {
+            vec![
+                "assets/green-bottle-22.png",                                    // Development path
+                "../Resources/assets/green-bottle-22.png",                      // App bundle path
+                "/Applications/PortKill.app/Contents/Resources/assets/green-bottle-22.png" // Absolute app bundle path
+            ]
         } else {
-            "assets/orange-bottle-24.png"
+            vec![
+                "assets/orange-bottle-22.png",                                   // Development path
+                "../Resources/assets/orange-bottle-22.png",                     // App bundle path
+                "/Applications/PortKill.app/Contents/Resources/assets/orange-bottle-22.png" // Absolute app bundle path
+            ]
         };
 
-        if Path::new(png_path).exists() {
-            debug!("Loading PNG file: {}", png_path);
-            
-            // Load and decode the PNG file
-            let img = ImageReader::open(png_path)?.decode()?;
-            let rgba = img.to_rgba8();
-            let width = img.width();
-            let height = img.height();
-            
-            debug!("PNG decoded: {}x{} pixels, {} bytes", width, height, rgba.len());
-            
-            // Create icon from RGBA data
-            return Ok(Icon::from_rgba(rgba.into_raw(), width, height)?);
+        // Try each path until we find one that works
+        for png_path in &png_paths {
+            if Path::new(png_path).exists() {
+                debug!("Loading PNG file: {}", png_path);
+                
+                // Load and decode the PNG file
+                match image::open(png_path) {
+                    Ok(img) => {
+                        let rgba = img.to_rgba8();
+                        let width = img.width();
+                        let height = img.height();
+                        
+                        debug!("PNG decoded: {}x{} pixels, {} bytes", width, height, rgba.len());
+                        
+                        // Create icon from RGBA data
+                        match Icon::from_rgba(rgba.into_raw(), width, height) {
+                            Ok(icon) => {
+                                debug!("Successfully created icon from PNG data");
+                                return Ok(icon);
+                            },
+                            Err(e) => {
+                                debug!("Failed to create icon from PNG data: {}", e);
+                                // Continue to next path or fallback
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        debug!("Failed to load PNG {}: {}", png_path, e);
+                        // Continue to next path
+                    }
+                }
+            }
         }
 
         Err(anyhow::anyhow!("PNG files not found or PNG decoding not implemented"))
@@ -170,16 +197,16 @@ impl TrayMenu {
         // Generate poison bottle icon with status colors
         let icon_data = Self::generate_poison_bottle_icon(text);
 
-        // Try 24x24 first (matches your SVG), then fallback to other sizes
-        match Icon::from_rgba(icon_data.clone(), 24, 24) {
+        // Try the actual PNG dimensions first, then fallback to other sizes
+        match Icon::from_rgba(icon_data.clone(), 22, 22) {
             Ok(icon) => Ok(icon),
             Err(_) => {
-                // Try 32x32 as fallback
-                match Icon::from_rgba(icon_data.clone(), 32, 32) {
+                // Try 16x16 as fallback (common status bar size)
+                match Icon::from_rgba(icon_data.clone(), 16, 16) {
                     Ok(icon) => Ok(icon),
                     Err(_) => {
-                        // Final fallback to 16x16
-                        Icon::from_rgba(icon_data, 16, 16)
+                        // Final fallback to 32x32
+                        Icon::from_rgba(icon_data, 32, 32)
                             .map_err(|e| anyhow::anyhow!("Failed to create poison bottle icon: {}", e))
                     }
                 }
@@ -195,7 +222,7 @@ impl TrayMenu {
 
         // Fallback: Create a much simpler, cleaner icon that doesn't try to recreate the complex SVG
         let mut icon_data = Vec::new();
-        let size = 24; // Match your new 24x24 SVGs
+        let size = 22; // Match the status bar appropriate size
         
         debug!("Generating {}x{} RGBA bitmap = {} bytes", size, size, size * size * 4);
 
