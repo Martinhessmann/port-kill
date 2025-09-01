@@ -63,7 +63,7 @@ impl TrayMenu {
         Ok(())
     }
 
-    pub fn create_menu(processes: &HashMap<u16, ProcessInfo>, show_pid: bool) -> Result<Menu> {
+        pub fn create_menu(processes: &HashMap<u16, ProcessInfo>, show_pid: bool) -> Result<Menu> {
         let menu = Menu::new();
 
         // Add "Kill All Processes" item with proper ID
@@ -111,6 +111,15 @@ impl TrayMenu {
         // Add "Quit" item with proper ID
         let quit_item = MenuItem::new("Quit", true, None);
         menu.append(&quit_item)?;
+
+        // Add debug info in debug mode
+        if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+            let debug_separator = PredefinedMenuItem::separator();
+            menu.append(&debug_separator)?;
+
+            let debug_info = MenuItem::new(&format!("Debug: {} processes", processes.len()), false, None);
+            menu.append(&debug_info)?;
+        }
 
         Ok(menu)
     }
