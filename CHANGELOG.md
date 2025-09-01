@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **macOS Application Bundle** - Professional .app bundle structure for `/Applications/` installation
   - ⚠️ **Testing Required**: Launch behavior, permissions, icon display in Finder/Dock
 - **DMG Installer** - Drag-and-drop installer with custom background and Applications shortcut
+  - ✅ **Implemented**: Auto-overwrite functionality for seamless upgrades
   - ⚠️ **Testing Required**: Installation flow, code signing warnings, upgrade from previous versions
 - **Enhanced Installation Script** - One-liner installation with automatic dependency handling
   - ⚠️ **Testing Required**: Fresh system installation, PATH configuration, cross-platform detection

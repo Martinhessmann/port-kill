@@ -5,11 +5,6 @@
 
 set -e
 
-# Clean up any existing temp files
-echo "🧹 Cleaning up existing temp files..."
-rm -f "$DMG_TEMP" 2>/dev/null || true
-hdiutil detach "/Volumes/PortKill" 2>/dev/null || true
-
 echo "🏴‍☠️  Creating PortKill DMG..."
 echo "============================="
 
@@ -23,6 +18,16 @@ DMG_NAME="$DIST_DIR/PortKill-v1.3.dmg"
 DMG_TEMP="build/PortKill-temp.dmg"
 APP_NAME="PortKill.app"
 BUILD_DIR="build"
+
+# Clean up any existing temp files
+echo "🧹 Cleaning up existing temp files..."
+rm -f "$DMG_TEMP" 2>/dev/null || true
+rm -f "$DMG_NAME" 2>/dev/null || true
+# Force close any Finder windows and unmount
+osascript -e 'tell application "Finder" to close every window' 2>/dev/null || true
+diskutil unmount force "/Volumes/PortKill" 2>/dev/null || true
+hdiutil detach "/Volumes/PortKill" -force 2>/dev/null || true
+sleep 2
 
 # Create dist directory
 mkdir -p "$DIST_DIR"
@@ -162,7 +167,13 @@ end tell
 APPLESCRIPT_EOF
 
 # Unmount and convert to compressed DMG
-hdiutil detach "/Volumes/PortKill"
+echo "📦 Finalizing DMG..."
+# Close any Finder windows first
+osascript -e 'tell application "Finder" to close every window' 2>/dev/null || true
+sleep 1
+# Force unmount if needed
+hdiutil detach "/Volumes/PortKill" -force 2>/dev/null || diskutil unmount force "/Volumes/PortKill" 2>/dev/null || true
+sleep 1
 hdiutil convert "$DMG_TEMP" -format UDZO -o "$DMG_NAME"
 
 # Clean up build artifacts
