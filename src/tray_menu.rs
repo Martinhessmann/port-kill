@@ -1,6 +1,7 @@
 use crate::types::{ProcessInfo, StatusBarInfo};
 use anyhow::Result;
 use crossbeam_channel::Sender;
+use image::ImageReader;
 use log::debug;
 use std::collections::HashMap;
 use std::fs;
@@ -127,101 +128,105 @@ impl TrayMenu {
 
 
     pub fn create_icon(text: &str) -> Result<Icon> {
-        // Try to load custom poison bottle icon first
-        if let Ok(icon) = Self::load_custom_icon(text) {
-            return Ok(icon);
-        }
-
-        // Fallback to generated icon
-        let icon_data = Self::generate_visible_icon(text);
-
-        // Try different sizes for better compatibility
-        match Icon::from_rgba(icon_data.clone(), 16, 16) {
-            Ok(icon) => Ok(icon),
-            Err(_) => {
-                // Fallback to 32x32
-                Icon::from_rgba(icon_data, 32, 32)
-                    .map_err(|e| anyhow::anyhow!("Failed to create icon: {}", e))
-            }
-        }
+        // Always use the poison bottle icon (custom PNG files are handled within create_poison_bottle_icon)
+        Self::create_poison_bottle_icon(text)
     }
 
-    fn load_custom_icon(text: &str) -> Result<Icon> {
-        // Try to load the custom poison bottle icon
-        let icon_paths = [
-            "assets/small.png",
-            "assets/large.png",
-            "/Users/martinhessmann/repositories/tertianum-premiumresidences.de/port-kill-enhanced/assets/small.png",
-            "/Users/martinhessmann/repositories/tertianum-premiumresidences.de/port-kill-enhanced/assets/large.png",
-        ];
+    fn load_custom_png_icon(text: &str) -> Result<Icon> {
+        // Parse the number to determine which PNG to use
+        let number = text.chars().filter(|c| c.is_numeric()).collect::<String>();
+        let num = number.parse::<u32>().unwrap_or(0);
 
-        for path in &icon_paths {
-            if Path::new(path).exists() {
-                if let Ok(icon_data) = fs::read(path) {
-                    // For PNG files, we need to decode them first
-                    // For now, let's use a simple approach with the generated icon but with poison bottle colors
-                    return Self::create_poison_bottle_icon(text);
-                }
-            }
+        let png_path = if num == 0 {
+            "assets/green-bottle-24.png"
+        } else {
+            "assets/orange-bottle-24.png"
+        };
+
+        if Path::new(png_path).exists() {
+            debug!("Loading PNG file: {}", png_path);
+            
+            // Load and decode the PNG file
+            let img = ImageReader::open(png_path)?.decode()?;
+            let rgba = img.to_rgba8();
+            let width = img.width();
+            let height = img.height();
+            
+            debug!("PNG decoded: {}x{} pixels, {} bytes", width, height, rgba.len());
+            
+            // Create icon from RGBA data
+            return Ok(Icon::from_rgba(rgba.into_raw(), width, height)?);
         }
 
-        Err(anyhow::anyhow!("Custom icon not found"))
+        Err(anyhow::anyhow!("PNG files not found or PNG decoding not implemented"))
     }
 
     fn create_poison_bottle_icon(text: &str) -> Result<Icon> {
-        // Create a poison bottle icon with status colors
+        // Try to load custom PNG files first
+        if let Ok(icon) = Self::load_custom_png_icon(text) {
+            return Ok(icon);
+        }
+
+        // Generate poison bottle icon with status colors
         let icon_data = Self::generate_poison_bottle_icon(text);
 
-        match Icon::from_rgba(icon_data.clone(), 16, 16) {
+        // Try 24x24 first (matches your SVG), then fallback to other sizes
+        match Icon::from_rgba(icon_data.clone(), 24, 24) {
             Ok(icon) => Ok(icon),
             Err(_) => {
-                // Fallback to 32x32
-                Icon::from_rgba(icon_data, 32, 32)
-                    .map_err(|e| anyhow::anyhow!("Failed to create poison bottle icon: {}", e))
+                // Try 32x32 as fallback
+                match Icon::from_rgba(icon_data.clone(), 32, 32) {
+                    Ok(icon) => Ok(icon),
+                    Err(_) => {
+                        // Final fallback to 16x16
+                        Icon::from_rgba(icon_data, 16, 16)
+                            .map_err(|e| anyhow::anyhow!("Failed to create poison bottle icon: {}", e))
+                    }
+                }
             }
         }
     }
 
     fn generate_poison_bottle_icon(text: &str) -> Vec<u8> {
-        // Create a poison bottle icon with status-based colors
-        let mut icon_data = Vec::new();
+        // Try to load the actual SVG files first
+        if let Ok(icon_data) = Self::load_svg_icon(text) {
+            return icon_data;
+        }
 
-        for y in 0..32 {
-            for x in 0..32 {
-                // Parse the number from text
+        // Fallback: Create a much simpler, cleaner icon that doesn't try to recreate the complex SVG
+        let mut icon_data = Vec::new();
+        let size = 24; // Match your new 24x24 SVGs
+        
+        debug!("Generating {}x{} RGBA bitmap = {} bytes", size, size, size * size * 4);
+
+        for y in 0..size {
+            for x in 0..size {
+                // Parse the number from text to determine status
                 let number = text.chars().filter(|c| c.is_numeric()).collect::<String>();
                 let num = number.parse::<u32>().unwrap_or(0);
 
-                // Determine status color
+                // Use the exact colors from your SVG files but with a simple, clean design
                 let (status_r, status_g, status_b) = if num == 0 {
-                    (0, 255, 0) // Green when no processes
-                } else if num <= 9 {
-                    (255, 165, 0) // Orange for 1-9 processes
+                    (95, 249, 57) // Green from your green bottle.svg (#5FF939)
                 } else {
-                    (255, 0, 0) // Red for 10+ processes
+                    (255, 165, 0) // Orange from your orange bottle.svg (#FFA500)
                 };
 
-                // Create poison bottle shape
-                let is_bottle_body = x >= 8 && x <= 23 && y >= 12 && y <= 28;
-                let is_bottle_neck = x >= 12 && x <= 19 && y >= 8 && y <= 11;
-                let is_bottle_cap = x >= 11 && x <= 20 && y >= 6 && y <= 7;
-                let is_skull_area = x >= 12 && x <= 19 && y >= 14 && y <= 21;
+                // Create a simple, clean circle icon instead of trying to recreate the complex bottle
+                let center_x = size as f32 / 2.0;
+                let center_y = size as f32 / 2.0;
+                let radius = (size as f32 / 2.0) - 2.0; // Leave 2px border
+                
+                let dx = x as f32 - center_x;
+                let dy = y as f32 - center_y;
+                let distance = (dx * dx + dy * dy).sqrt();
 
-                let (r, g, b, a) = if is_bottle_body {
-                    // White bottle body with status-colored liquid
-                    if y >= 20 {
-                        (status_r, status_g, status_b, 255) // Colored liquid
-                    } else {
-                        (255, 255, 255, 255) // White bottle
-                    }
-                } else if is_bottle_neck {
-                    (255, 255, 255, 255) // White neck
-                } else if is_bottle_cap {
-                    (status_r, status_g, status_b, 255) // Colored cap
-                } else if is_skull_area {
-                    (255, 255, 255, 255) // White skull
+                let (r, g, b, a) = if distance <= radius {
+                    // Solid circle with status color
+                    (status_r, status_g, status_b, 255)
                 } else {
-                    (0, 0, 0, 0) // Transparent background
+                    // Transparent background
+                    (0, 0, 0, 0)
                 };
 
                 icon_data.extend_from_slice(&[r, g, b, a]);
@@ -231,41 +236,25 @@ impl TrayMenu {
         icon_data
     }
 
-    fn generate_visible_icon(text: &str) -> Vec<u8> {
-        // Create a much larger, highly visible 32x32 RGBA icon for the status bar
-        let mut icon_data = Vec::new();
+    fn load_svg_icon(text: &str) -> Result<Vec<u8>> {
+        // Parse the number to determine which SVG to use
+        let number = text.chars().filter(|c| c.is_numeric()).collect::<String>();
+        let num = number.parse::<u32>().unwrap_or(0);
 
-        for y in 0..32 {
-            for x in 0..32 {
-                // Create a very simple, highly visible icon
-                let _is_edge = x < 2 || x > 29 || y < 2 || y > 29;
-                let _is_center = x >= 14 && x <= 17 && y >= 14 && y <= 17;
+        let svg_path = if num == 0 {
+            "assets/green bottle.svg"
+        } else {
+            "assets/orange bottle.svg"
+        };
 
-                // Create a number display area in the center
-                let is_number_area = x >= 12 && x <= 19 && y >= 12 && y <= 19;
-
-                let (r, g, b, a) = if is_number_area {
-                    // Parse the number from text (remove any non-numeric characters)
-                    let number = text.chars().filter(|c| c.is_numeric()).collect::<String>();
-                    let num = number.parse::<u32>().unwrap_or(0);
-
-                    if num == 0 {
-                        (0, 255, 0, 255) // Bright green when no processes
-                    } else if num <= 9 {
-                        // For 1-9 processes, use orange
-                        (255, 165, 0, 255) // Orange for 1-9 processes
-                    } else {
-                        // For 10+ processes, use red to indicate many processes
-                        (255, 0, 0, 255) // Red for 10+ processes
-                    }
-                } else {
-                    (255, 255, 255, 255) // Clean white background
-                };
-
-                icon_data.extend_from_slice(&[r, g, b, a]);
-            }
+        if Path::new(svg_path).exists() {
+            debug!("Found SVG file: {}, but SVG rendering not yet implemented", svg_path);
+            // TODO: Implement proper SVG to bitmap conversion using resvg crate
+            // For now, this will always fail and use the clean circle fallback
+            // The SVG files are perfect 24x24 but we need SVG->bitmap conversion
         }
 
-        icon_data
+        Err(anyhow::anyhow!("SVG loading not implemented, using pixel fallback"))
     }
+
 }

@@ -3,6 +3,10 @@
 **/*.rs.bk
 Cargo.lock
 
+# Build artifacts
+/build/
+/dist/
+
 # IDE
 .vscode/
 .idea/

@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(./create-dmg.sh:*)",
+      "Bash(hdiutil detach:*)",
+      "Bash(true)",
+      "Bash(hdiutil convert:*)",
+      "Bash(open:*)",
+      "Bash(./build-macos.sh:*)",
+      "Bash(./target/release/port-kill:*)",
+      "Bash(cargo build:*)",
+      "Bash(timeout:*)",
+      "Bash(RUST_LOG=debug ./target/release/port-kill --console --ports 3000 --verbose)"
     ],
     "deny": []
   }
