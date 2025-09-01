@@ -1,5 +1,14 @@
 # 🐛 PortKill Enhanced Debugging Guide
 
+## ⚠️ Known Issues (v1.3)
+
+1. **10-second menu update delay** - Menu shows empty until timer expires
+2. **App crashes after killing** - Processes ARE killed but app segfaults  
+3. **MenuId mapping** - Hardcoded IDs may change between runs
+4. **Tray icon sometimes disappears** - macOS tray stability issues
+
+**Recommendation**: Use console mode (`port-kill-console --console`) for stable operation
+
 ## Quick Debug Commands
 
 ### 1. **Check if PortKill is running**
@@ -37,25 +46,84 @@ log show --predicate 'process == "port-kill"' --last 1h --info
 
 ## Common Issues and Solutions
 
-### 🚫 **"Quit" doesn't work**
-**Symptoms**: Clicking "Quit" in the menu does nothing
+### ⏱️ **Menu shows no processes initially (10-second delay)**
+**Symptoms**: 
+- Tray icon appears but menu shows empty/no processes
+- Menu only updates after 10+ seconds or when clicking the icon
+- Log shows: "Process count changed from 0 to X but skipping menu update (killing: false, time passed: false)"
+
+**Root Cause**: 
+- Intentional 10-second delay to prevent macOS tray crashes
+- Menu won't update until this timer expires
 
 **Debug Steps**:
-1. Run in console mode to see what's happening:
+1. Watch the logs to see when menu updates:
    ```bash
-   port-kill-console --console --ports 3000,8000 --verbose
+   RUST_LOG=info port-kill --ports 3000,8000 --verbose
    ```
-2. Check if the app has proper permissions
-3. Look for error messages in the console output
-4. Try force-quitting: `pkill -f port-kill`
+2. Look for: "Process count changed from 0 to X, updating menu..."
 
 **Solutions**:
-- Restart the app
-- Check macOS permissions in System Preferences > Security & Privacy
-- Use console mode instead of system tray mode
+- Wait 10+ seconds after launch before clicking menu
+- Click the tray icon to force refresh
+- Use console mode for immediate feedback: `port-kill-console --console`
 
-### 🔪 **Port killing doesn't work**
-**Symptoms**: Clicking "Kill" on a process does nothing
+### 💥 **App crashes after killing ANY process**
+**Symptoms**: 
+- App crashes with "segmentation fault" after successfully killing processes
+- Crash occurs with BOTH "Kill All" AND individual process kills
+- Processes ARE killed successfully before the crash
+- Crash happens ~5 seconds after kill when menu tries to update
+
+**Debug Steps**:
+1. Run with debug logging to capture crash details:
+   ```bash
+   RUST_LOG=debug port-kill --ports 3000,8000 --verbose
+   ```
+2. Check if processes were actually killed:
+   ```bash
+   lsof -ti :3000 :8000 :8080
+   ```
+
+**Root Cause**: 
+- macOS tray-icon library instability after menu updates
+- Known issue with menu recreation after process changes
+
+**Workarounds**:
+- Use console mode which doesn't crash: `port-kill-console --console`
+- Restart app after kills: `pkill -f port-kill && port-kill`
+- Accept that processes ARE killed despite the crash
+
+### 🔢 **Menu actions sometimes don't work (MenuId mapping issue)**
+**Symptoms**: 
+- Clicking menu items shows "Invalid menu index" or "Unknown menu item" in logs
+- MenuIds don't match expected values (e.g., "10" instead of "0" for Kill All)
+- Some clicks work, others don't
+
+**Root Cause**: 
+- macOS tray-icon crate assigns dynamic MenuIds that change between runs
+- Current fix maps common IDs (10=Kill All, 16=Quit, 12-15=Processes)
+
+**Debug Steps**:
+1. Check what MenuId was clicked:
+   ```bash
+   RUST_LOG=info port-kill --ports 3000,8000 --verbose
+   # Look for: "Menu ID: XX"
+   ```
+2. Note which IDs correspond to which menu items
+
+**Solutions**:
+- Current hardcoded mapping works for most cases
+- If IDs change, update the mapping in app.rs
+- Use console mode for reliable operation
+
+### 🔪 **Port killing appears to fail (but actually works)**
+**Symptoms**: 
+- App crashes after clicking "Kill" 
+- Menu doesn't update to show process is gone
+- Appears that killing failed
+
+**Reality**: Process killing DOES work - the crash happens afterwards
 
 **Debug Steps**:
 1. Check if you have permission to kill the process:

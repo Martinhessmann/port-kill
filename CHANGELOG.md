@@ -33,6 +33,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **DMG Creation Issues** - Fixed volume unmounting problems and build script reliability
   - ✅ **Resolved**: Force unmount functionality and Finder window cleanup
   - ✅ **Resolved**: Auto-overwrite existing installations in /Applications/
+- **Menu ID Mapping** - Partially fixed hardcoded mapping for common MenuIds
+  - ✅ **Works**: Kill All (ID: 10), Quit (ID: 16), Process items (IDs: 12-15)
+  - ⚠️ **Issue**: IDs may change between runs
+
+### Known Issues
+- **Menu Update Delay** - 10-second delay before menu shows processes (crash prevention)
+- **Post-Kill Crashes** - App segfaults ~5 seconds after ANY successful kill operation
+  - Crash occurs when menu tries to update after process count changes
+  - Processes ARE killed successfully before crash
+- **Tray Stability** - Icon may disappear or become unresponsive  
+- **Console Mode Recommended** - More stable than tray mode for production use
 
 ### Testing Status
 
