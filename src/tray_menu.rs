@@ -139,15 +139,21 @@ impl TrayMenu {
         // Try multiple paths for PNG files (app bundle and development)
         let png_paths = if num == 0 {
             vec![
-                "assets/green-bottle-22.png",                                    // Development path
-                "../Resources/assets/green-bottle-22.png",                      // App bundle path
-                "/Applications/PortKill.app/Contents/Resources/assets/green-bottle-22.png" // Absolute app bundle path
+                "assets/green-bottle-36.png",                                    // Development path
+                "../Resources/assets/green-bottle-36.png",                      // App bundle path
+                "/Applications/PortKill.app/Contents/Resources/assets/green-bottle-36.png", // Absolute app bundle path
+                "assets/green-bottle-22.png",                                    // Fallback to 22px
+                "../Resources/assets/green-bottle-22.png",                      
+                "/Applications/PortKill.app/Contents/Resources/assets/green-bottle-22.png"
             ]
         } else {
             vec![
-                "assets/orange-bottle-22.png",                                   // Development path
-                "../Resources/assets/orange-bottle-22.png",                     // App bundle path
-                "/Applications/PortKill.app/Contents/Resources/assets/orange-bottle-22.png" // Absolute app bundle path
+                "assets/orange-bottle-36.png",                                   // Development path
+                "../Resources/assets/orange-bottle-36.png",                     // App bundle path
+                "/Applications/PortKill.app/Contents/Resources/assets/orange-bottle-36.png", // Absolute app bundle path
+                "assets/orange-bottle-22.png",                                   // Fallback to 22px
+                "../Resources/assets/orange-bottle-22.png",                     
+                "/Applications/PortKill.app/Contents/Resources/assets/orange-bottle-22.png"
             ]
         };
 
