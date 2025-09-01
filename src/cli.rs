@@ -60,6 +60,10 @@ pub struct Args {
     /// Log level (info, warn, error, none)
     #[arg(long, default_value = "info", value_enum)]
     pub log_level: LogLevel,
+
+    /// Auto-discover ALL listening processes on ANY port (ignores port range/specific ports)
+    #[arg(long)]
+    pub discover_all: bool,
 }
 
 impl Args {
@@ -91,7 +95,9 @@ impl Args {
 
     /// Get a description of the port configuration
     pub fn get_port_description(&self) -> String {
-        let mut description = if let Some(ref specific_ports) = self.ports {
+        let mut description = if self.discover_all {
+            "auto-discovering ALL listening processes on ANY port".to_string()
+        } else if let Some(ref specific_ports) = self.ports {
             format!("specific ports: {}", specific_ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "))
         } else {
             format!("port range: {}-{}", self.start_port, self.end_port)
@@ -121,20 +127,23 @@ impl Args {
 
     /// Validate the arguments
     pub fn validate(&self) -> Result<(), String> {
-        // Validate port range
-        if self.start_port > self.end_port {
-            return Err("Start port cannot be greater than end port".to_string());
-        }
-
-        // Validate specific ports if provided
-        if let Some(ref specific_ports) = self.ports {
-            if specific_ports.is_empty() {
-                return Err("At least one port must be specified".to_string());
+        // If discover_all is enabled, port configuration is not needed
+        if !self.discover_all {
+            // Validate port range
+            if self.start_port > self.end_port {
+                return Err("Start port cannot be greater than end port".to_string());
             }
-            
-            for &port in specific_ports {
-                if port == 0 {
-                    return Err("Port 0 is not valid".to_string());
+
+            // Validate specific ports if provided
+            if let Some(ref specific_ports) = self.ports {
+                if specific_ports.is_empty() {
+                    return Err("At least one port must be specified".to_string());
+                }
+                
+                for &port in specific_ports {
+                    if port == 0 {
+                        return Err("Port 0 is not valid".to_string());
+                    }
                 }
             }
         }
@@ -204,6 +213,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         let ports = args.get_ports_to_monitor();
@@ -222,6 +233,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         let ports = args.get_ports_to_monitor();
@@ -240,6 +253,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         let ignore_ports = args.get_ignore_ports_set();
@@ -258,6 +273,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         let ignore_processes = args.get_ignore_processes_set();
@@ -276,6 +293,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert_eq!(args.get_port_description(), "port range: 2000-6000 (ignoring ports: 5353, 5000, ignoring processes: Chrome, ControlCe)");
@@ -293,6 +312,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert_eq!(args.get_port_description(), "port range: 3000-3010");
@@ -310,6 +331,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert_eq!(args.get_port_description(), "specific ports: 3000, 8000, 8080");
@@ -327,6 +350,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert!(args.validate().is_ok());
@@ -344,6 +369,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert!(args.validate().is_err());
@@ -361,6 +388,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert!(args.validate().is_err());
@@ -378,6 +407,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert!(args.validate().is_err());
@@ -395,6 +426,8 @@ mod tests {
             verbose: false,
             docker: false,
             show_pid: false,
+            log_level: LogLevel::Info,
+            discover_all: false,
         };
         
         assert!(args.validate().is_err());

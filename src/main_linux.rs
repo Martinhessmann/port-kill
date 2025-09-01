@@ -6,6 +6,7 @@ use port_kill::{
     console_app::ConsolePortKillApp,
     types::StatusBarInfo,
     process_monitor::{get_processes_on_ports, kill_all_processes},
+    app::PortKillApp,
 };
 use tray_item::TrayItem;
 use anyhow::Result;
@@ -87,8 +88,14 @@ async fn start_tray_mode(args: Args) -> Result<()> {
     // Set up tray icon click handler
     tray.add_menu_item("Kill All Processes", move || {
         info!("Kill All Processes clicked");
-        let ports_to_kill = args_clone.get_ports_to_monitor();
-        if let Err(e) = kill_all_processes(&ports_to_kill, &args_clone) {
+        let result = if args_clone.discover_all {
+            PortKillApp::kill_all_discovered_processes(&args_clone)
+        } else {
+            let ports_to_kill = args_clone.get_ports_to_monitor();
+            kill_all_processes(&ports_to_kill, &args_clone)
+        };
+        
+        if let Err(e) = result {
             error!("Failed to kill all processes: {}", e);
         }
     })?;
@@ -107,8 +114,11 @@ async fn start_tray_mode(args: Args) -> Result<()> {
         thread::sleep(Duration::from_secs(5));
         
         // Get current processes
-        let (process_count, processes) = 
-            get_processes_on_ports(&args.get_ports_to_monitor(), &args);
+        let (process_count, processes) = if args.discover_all {
+            PortKillApp::discover_all_listening_processes(&args)
+        } else {
+            get_processes_on_ports(&args.get_ports_to_monitor(), &args)
+        };
         
         // Update status
         let status_info = StatusBarInfo::from_process_count(process_count);

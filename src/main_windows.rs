@@ -3,6 +3,7 @@ use port_kill::{
     console_app::ConsolePortKillApp,
     types::{ProcessInfo, StatusBarInfo},
     process_monitor::{get_processes_on_ports, kill_all_processes, kill_single_process},
+    app::PortKillApp,
 };
 use tray_item::TrayItem;
 use anyhow::{Result, Context};
@@ -90,8 +91,14 @@ fn run_windows_tray_mode(args: Args) -> Result<()> {
             match event {
                 "kill_all" => {
                     info!("Kill All Processes clicked");
-                    let ports_to_kill = args.get_ports_to_monitor();
-                    if let Err(e) = kill_all_processes(&ports_to_kill, &args) {
+                    let result = if args.discover_all {
+                        PortKillApp::kill_all_discovered_processes(&args)
+                    } else {
+                        let ports_to_kill = args.get_ports_to_monitor();
+                        kill_all_processes(&ports_to_kill, &args)
+                    };
+                    
+                    if let Err(e) = result {
                         error!("Failed to kill all processes: {}", e);
                     } else {
                         println!("✅ All processes killed successfully");
@@ -113,7 +120,11 @@ fn run_windows_tray_mode(args: Args) -> Result<()> {
             
             // Get process information with error handling
             let (process_count, processes) = match std::panic::catch_unwind(|| {
-                get_processes_on_ports(&args.get_ports_to_monitor(), &args)
+                if args.discover_all {
+                    PortKillApp::discover_all_listening_processes(&args)
+                } else {
+                    get_processes_on_ports(&args.get_ports_to_monitor(), &args)
+                }
             }) {
                 Ok(result) => result,
                 Err(e) => {

@@ -413,6 +413,55 @@ impl PortKillApp {
         }
     }
 
+    /// Discover ALL listening processes on ANY port (true auto-discovery!)
+    pub fn discover_all_listening_processes(args: &Args) -> (usize, HashMap<u16, crate::types::ProcessInfo>) {
+        info!("🔍 Auto-discovering ALL listening processes on ALL ports...");
+
+        // Use lsof to scan ALL ports and find ALL listening processes
+        let output = std::process::Command::new("lsof")
+            .args(&["-i", "-P", "-n", "-sTCP:LISTEN"])
+            .output();
+
+        match output {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut processes = HashMap::new();
+
+                // Get ignore sets for efficient lookup
+                let ignore_ports = args.get_ignore_ports_set();
+                let ignore_processes = args.get_ignore_processes_set();
+
+                for line in stdout.lines().skip(1) { // Skip header
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 9 {
+                        if let (Ok(pid), Ok(port)) = (parts[1].parse::<i32>(), parts[8].split(':').last().unwrap_or("0").parse::<u16>()) {
+                            let command = parts[0].to_string();
+                            let name = parts[0].to_string();
+
+                            // Check if this process should be ignored
+                            let should_ignore = ignore_ports.contains(&port) || ignore_processes.contains(&name);
+
+                            if !should_ignore {
+                                processes.insert(port, crate::types::ProcessInfo {
+                                    pid,
+                                    port,
+                                    command,
+                                    name,
+                                    container_id: None,
+                                    container_name: None,
+                                });
+                            } else {
+                                info!("Ignoring process {} (PID {}) on port {} (ignored by user configuration)", name, pid, port);
+                            }
+                        }
+                    }
+                }
+
+                (processes.len(), processes)
+            }
+            Err(_) => (0, HashMap::new())
+        }
+    }
 
     pub fn kill_all_discovered_processes(args: &Args) -> Result<()> {
         info!("Killing ALL discovered listening processes...");
@@ -623,6 +672,71 @@ impl PortKillApp {
         Ok(())
     }
 
+    pub fn kill_all_discovered_processes(args: &Args) -> Result<()> {
+        info!("🔪 Killing ALL discovered processes on ALL ports...");
+
+        // Use lsof to scan ALL listening processes
+        let output = std::process::Command::new("lsof")
+            .args(&["-i", "-P", "-n", "-sTCP:LISTEN"])
+            .output();
+
+        match output {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut pids_to_kill = Vec::new();
+
+                // Get ignore sets for efficient lookup
+                let ignore_ports = args.get_ignore_ports_set();
+                let ignore_processes = args.get_ignore_processes_set();
+
+                for line in stdout.lines().skip(1) { // Skip header
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 9 {
+                        if let Ok(pid) = parts[1].parse::<i32>() {
+                            let name = parts[0].to_string();
+                            
+                            // Extract port from address (e.g., "*:3000" -> 3000)
+                            if let Some(port_str) = parts[8].split(':').last() {
+                                if let Ok(port) = port_str.parse::<u16>() {
+                                    // Check if this process should be ignored
+                                    let should_ignore = ignore_ports.contains(&port) || ignore_processes.contains(&name);
+
+                                    if !should_ignore {
+                                        info!("📍 Found process to kill: {} (PID {}) on port {}", name, pid, port);
+                                        pids_to_kill.push(pid);
+                                    } else {
+                                        info!("⏭️ Ignoring process {} (PID {}) on port {} (ignored by user configuration)", name, pid, port);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if pids_to_kill.is_empty() {
+                    info!("✅ No processes found to kill (all were ignored or none found)");
+                    return Ok(());
+                }
+
+                info!("🎯 Found {} processes to kill (after filtering ignored processes)", pids_to_kill.len());
+
+                for pid in pids_to_kill {
+                    info!("⚡ Attempting to kill process PID: {}", pid);
+                    match Self::kill_process(pid) {
+                        Ok(_) => info!("✅ Successfully killed process PID: {}", pid),
+                        Err(e) => error!("❌ Failed to kill process {}: {}", pid, e),
+                    }
+                }
+
+                info!("🏁 Finished killing all discovered processes");
+                Ok(())
+            }
+            Err(e) => {
+                error!("Failed to run lsof command for discovery: {}", e);
+                Err(anyhow::anyhow!("Failed to run lsof for discovery: {}", e))
+            }
+        }
+    }
 
     #[cfg(not(target_os = "windows"))]
     fn kill_process(pid: i32) -> Result<()> {

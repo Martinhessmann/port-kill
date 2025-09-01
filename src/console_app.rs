@@ -22,7 +22,7 @@ impl ConsolePortKillApp {
         let (update_sender, update_receiver) = bounded(100);
 
         // Create process monitor with configurable ports
-        let process_monitor = Arc::new(Mutex::new(ProcessMonitor::new(update_sender, args.get_ports_to_monitor(), args.docker)?));
+        let process_monitor = Arc::new(Mutex::new(ProcessMonitor::new(update_sender, args.get_ports_to_monitor(), args.docker, args.discover_all)?));
 
         Ok(Self {
             process_monitor,

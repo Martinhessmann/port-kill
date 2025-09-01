@@ -20,20 +20,24 @@ pub struct ProcessMonitor {
     current_processes: HashMap<u16, ProcessInfo>,
     ports_to_monitor: Vec<u16>,
     docker_enabled: bool,
+    discover_all: bool,
 }
 
 impl ProcessMonitor {
-    pub fn new(update_sender: Sender<ProcessUpdate>, ports_to_monitor: Vec<u16>, docker_enabled: bool) -> Result<Self> {
+    pub fn new(update_sender: Sender<ProcessUpdate>, ports_to_monitor: Vec<u16>, docker_enabled: bool, discover_all: bool) -> Result<Self> {
         Ok(Self {
             update_sender,
             current_processes: HashMap::new(),
             ports_to_monitor,
             docker_enabled,
+            discover_all,
         })
     }
 
     pub async fn start_monitoring(&mut self) -> Result<()> {
-        let port_description = if self.ports_to_monitor.len() <= 10 {
+        let port_description = if self.discover_all {
+            "ALL listening processes on ANY port (auto-discovery mode)".to_string()
+        } else if self.ports_to_monitor.len() <= 10 {
             format!("ports: {}", self.ports_to_monitor.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", "))
         } else {
             format!("{} ports: {} to {}",
@@ -68,9 +72,27 @@ impl ProcessMonitor {
         }
     }
 
-        async fn scan_processes(&self) -> Result<HashMap<u16, ProcessInfo>> {
-        // Stop guessing! Actually discover ALL processes listening on ALL ports
-        self.discover_all_listening_processes().await
+    async fn scan_processes(&self) -> Result<HashMap<u16, ProcessInfo>> {
+        if self.discover_all {
+            // Auto-discovery mode: find ALL listening processes on ANY port
+            self.discover_all_listening_processes().await
+        } else {
+            // Traditional mode: monitor specific ports
+            self.get_processes_on_specific_ports().await
+        }
+    }
+
+    /// Get processes on specific monitored ports (traditional mode)
+    async fn get_processes_on_specific_ports(&self) -> Result<HashMap<u16, ProcessInfo>> {
+        let mut processes = HashMap::new();
+        
+        for &port in &self.ports_to_monitor {
+            if let Ok(process_info) = self.get_process_on_port(port).await {
+                processes.insert(port, process_info);
+            }
+        }
+        
+        Ok(processes)
     }
 
     /// Discover ALL processes listening on ANY port (no more guessing!)
@@ -81,7 +103,7 @@ impl ProcessMonitor {
         {
             // Use lsof to find ALL listening processes on ALL ports
             let output = Command::new("lsof")
-                .args(&["-i", "-P", "-n"])  // -i for internet files, -P for port numbers, -n for numeric addresses
+                .args(&["-i", "-P", "-n", "-sTCP:LISTEN"])  // -i for internet files, -P for port numbers, -n for numeric addresses, -sTCP:LISTEN for only listening processes
                 .output()
                 .context("Failed to execute lsof command")?;
 
@@ -91,12 +113,33 @@ impl ProcessMonitor {
 
             let stdout = String::from_utf8_lossy(&output.stdout);
 
-            for line in stdout.lines() {
+            for line in stdout.lines().skip(1) { // Skip the header line
                 // Parse lsof output to extract listening processes
                 // Example line: "Python    1234 user   3u  IPv4 0x1234  0t0  TCP *:3000 (LISTEN)"
-                if line.contains("(LISTEN)") || line.contains("*:") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 9 && (line.contains("(LISTEN)") || line.contains("*:")) {
                     if let Some(port) = self.extract_port_from_lsof_line(line) {
-                        if let Ok(process_info) = self.get_process_on_port(port).await {
+                        // Extract process info directly from lsof output for efficiency
+                        if let Ok(pid) = parts[1].parse::<i32>() {
+                            let command = parts[0].to_string();
+                            let name = parts[0].to_string();
+
+                            // Check if this is a Docker container
+                            let (container_id, container_name) = if self.docker_enabled {
+                                self.get_docker_container_info(pid).await
+                            } else {
+                                (None, None)
+                            };
+
+                            let process_info = ProcessInfo {
+                                pid,
+                                port,
+                                command,
+                                name,
+                                container_id,
+                                container_name,
+                            };
+
                             processes.insert(port, process_info);
                         }
                     }
@@ -119,10 +162,19 @@ impl ProcessMonitor {
             let stdout = String::from_utf8_lossy(&output.stdout);
 
             for line in stdout.lines() {
-                if line.contains("LISTENING") || line.contains("0.0.0.0:") {
-                    if let Some(port) = self.extract_port_from_netstat_line(line) {
-                        if let Ok(process_info) = self.get_process_on_port(port).await {
-                            processes.insert(port, process_info);
+                if line.contains("LISTENING") {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 5 {
+                        // Extract port from local address (e.g., "0.0.0.0:3000")
+                        if let Some(port_str) = parts[1].split(':').last() {
+                            if let Ok(port) = port_str.parse::<u16>() {
+                                if let Ok(pid) = parts[4].parse::<i32>() {
+                                    // Get process details directly
+                                    if let Ok(process_info) = self.get_process_details_windows(pid, port).await {
+                                        processes.insert(port, process_info);
+                                    }
+                                }
+                            }
                         }
                     }
                 }
