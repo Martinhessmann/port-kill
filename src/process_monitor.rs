@@ -85,13 +85,13 @@ impl ProcessMonitor {
     /// Get processes on specific monitored ports (traditional mode)
     async fn get_processes_on_specific_ports(&self) -> Result<HashMap<u16, ProcessInfo>> {
         let mut processes = HashMap::new();
-        
+
         for &port in &self.ports_to_monitor {
             if let Ok(process_info) = self.get_process_on_port(port).await {
                 processes.insert(port, process_info);
             }
         }
-        
+
         Ok(processes)
     }
 
@@ -169,10 +169,10 @@ impl ProcessMonitor {
                         if let Some(port_str) = parts[1].split(':').last() {
                             if let Ok(port) = port_str.parse::<u16>() {
                                 if let Ok(pid) = parts[4].parse::<i32>() {
-                                    // Get process details directly
-                                    if let Ok(process_info) = self.get_process_details_windows(pid, port).await {
-                                        processes.insert(port, process_info);
-                                    }
+                                                                         // Get process details for Windows
+                                     if let Ok(process_info) = self.get_process_on_port(port).await {
+                                         processes.insert(port, process_info);
+                                     }
                                 }
                             }
                         }

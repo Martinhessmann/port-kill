@@ -97,6 +97,7 @@ impl PortKillApp {
         let tray_icon = self.tray_icon.clone();
         let mut last_check = std::time::Instant::now();
         let mut last_process_count = 0;
+        let mut last_ports: std::collections::BTreeSet<u16> = std::collections::BTreeSet::new();
         let is_killing_processes = self.is_killing_processes.clone();
         let last_menu_update = self.last_menu_update.clone();
         let menu_update_cooldown = self.menu_update_cooldown;
@@ -264,7 +265,7 @@ impl PortKillApp {
                         // Use a static menu and rely on console output for process information
                         let process_count_changed = process_count != last_process_count;
 
-                        if process_count_changed {
+                                                if process_count_changed {
                             info!("Process count changed from {} to {} - updating menu dynamically",
                                   last_process_count, process_count);
                             last_process_count = process_count;
@@ -276,12 +277,29 @@ impl PortKillApp {
                             } else {
                                 error!("Failed to create dynamic menu");
                             }
+                        } else {
+                            // Even if count is same, check if the actual processes changed (ports/names)
+                            // Only update if there's a significant change to avoid excessive updates
+                            let current_ports: std::collections::BTreeSet<u16> = processes.keys().cloned().collect();
+                            if last_ports != current_ports {
+                                info!("Process ports changed from {:?} to {:?} - updating menu",
+                                      last_ports.iter().collect::<Vec<_>>(),
+                                      current_ports.iter().collect::<Vec<_>>());
+                                last_ports = current_ports;
 
-                            // Update tooltip as well
-                            let status_info = StatusBarInfo::from_process_count(process_count);
-                            if let Err(e) = icon.set_tooltip(Some(&format!("{} - Click for actions", status_info.tooltip))) {
-                                error!("Failed to update tooltip: {}", e);
+                                if let Ok(new_menu) = Self::create_dynamic_menu(&processes) {
+                                    icon.set_menu(Some(Box::new(new_menu)));
+                                    info!("Menu updated successfully with {} processes (port change)", processes.len());
+                                } else {
+                                    error!("Failed to create dynamic menu");
+                                }
                             }
+                        }
+
+                        // Update tooltip as well (for both count and port changes)
+                        let status_info = StatusBarInfo::from_process_count(process_count);
+                        if let Err(e) = icon.set_tooltip(Some(&format!("{} - Click for actions", status_info.tooltip))) {
+                            error!("Failed to update tooltip: {}", e);
                         }
                     }
                 }
